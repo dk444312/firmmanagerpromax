@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 type User = {
   id: string;
@@ -31,20 +32,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (token) {
-      Promise.all([
-        fetch('/api/me', { headers: { 'Authorization': `Bearer ${token}` } }).then(res => res.json()),
-        fetch('/api/ui_config', { headers: { 'Authorization': `Bearer ${token}` } }).then(res => res.json()).catch(() => ({}))
-      ])
-      .then(([userData, configData]) => {
-        if (userData.error) {
+      if (token.startsWith('frontend_only_')) {
+        // Direct frontend auth mode
+        try {
+          const payloadString = atob(token.replace('frontend_only_', ''));
+          const payload = JSON.parse(payloadString);
+          
+          if (supabase) {
+            (async () => {
+              try {
+                const { data, error } = await supabase.from('staff').select('*').eq('id', payload.id).single();
+                if (error || !data) {
+                  logout();
+                } else {
+                  const { password_hash, ...userProfile } = data;
+                  setUser(userProfile);
+                  // grab UI config
+                  const { data: firmData } = await supabase.from('firms').select('ui_config').eq('id', userProfile.firm_id).single();
+                  if (firmData && firmData.ui_config) {
+                    setUiConfig(firmData.ui_config);
+                  }
+                }
+              } catch (e) {
+                logout();
+              } finally {
+                setLoading(false);
+              }
+            })();
+          } else {
+            setLoading(false);
+          }
+        } catch (e) {
           logout();
-        } else {
-          setUser(userData);
-          if (!configData.error) setUiConfig(configData);
+          setLoading(false);
         }
-      })
-      .catch(() => logout())
-      .finally(() => setLoading(false));
+      } else {
+        Promise.all([
+          fetch('/api/me', { headers: { 'Authorization': `Bearer ${token}` } }).then(res => res.json()),
+          fetch('/api/ui_config', { headers: { 'Authorization': `Bearer ${token}` } }).then(res => res.json()).catch(() => ({}))
+        ])
+        .then(([userData, configData]) => {
+          if (userData.error) {
+            logout();
+          } else {
+            setUser(userData);
+            if (!configData.error) setUiConfig(configData);
+          }
+        })
+        .catch(() => logout())
+        .finally(() => setLoading(false));
+      }
     } else {
       setLoading(false);
     }

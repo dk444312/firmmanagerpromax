@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Users, Plus, Search, Mail, Phone } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import bcrypt from 'bcryptjs';
 
 type Client = {
   id: string;
@@ -22,45 +24,41 @@ export default function Clients() {
   const [currentClient, setCurrentClient] = useState({ id: '', full_name: '', phone_number: '', email: '', gender: 'Male', username: '', password: '' });
 
   const fetchClients = async () => {
-    if (!token) return;
-    const res = await fetch('/api/clients', { headers: { 'Authorization': `Bearer ${token}` } });
-    const data = await res.json();
-    setClients(Array.isArray(data) ? data : []);
+    if (!token || !supabase || !user) return;
+    const res = await supabase.from('clients').select('*').eq('firm_id', user.firm_id);
+    setClients(res.data || []);
     setLoading(false);
   };
 
   useEffect(() => {
     fetchClients();
-  }, [token]);
+  }, [token, user]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
+    if (!token || !supabase || !user) return;
+    
+    let dbPayload = { ...currentClient };
+    const rawPassword = dbPayload.password;
+    delete (dbPayload as any).password;
+    
+    if (rawPassword) {
+      (dbPayload as any).password_hash = await import('bcryptjs').then(m => m.hash(rawPassword, 10));
+    }
     
     if (isEditing) {
-      await fetch(`/api/clients/${currentClient.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(currentClient)
-      });
+      await supabase.from('clients').update(dbPayload).eq('id', currentClient.id);
     } else {
-      const { id, ...dataToSend } = currentClient;
-      await fetch('/api/clients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(dataToSend)
-      });
+      const { id, ...dataToSend } = dbPayload;
+      await supabase.from('clients').insert([{ ...dataToSend, firm_id: user.firm_id }]);
     }
     fetchClients();
     setIsModalOpen(false);
   };
 
   const handleDelete = async (id: string) => {
-    if (!token || !confirm("Delete this client?")) return;
-    await fetch(`/api/clients/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this client?")) return;
+    await supabase.from('clients').delete().eq('id', id);
     fetchClients();
     setIsModalOpen(false);
   };

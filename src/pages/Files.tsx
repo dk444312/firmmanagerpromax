@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { FolderOpen, Upload, Search, FileText, Download, Trash, RefreshCw, Clock, Link as LinkIcon, XCircle } from 'lucide-react';
 import CaseSelectorModal from '../components/CaseSelectorModal';
+import { supabase } from '../lib/supabase';
 
 type Folder = { id: string; name: string; firm_id: string; };
 type FirmFile = { id: string; filename: string; file_url: string; folder_id: string; created_at: string; case_id?: string; case_title?: string; pending_filing?: boolean };
@@ -34,71 +35,63 @@ export default function Files() {
   };
 
   const fetchData = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     const [fRes, fileRes] = await Promise.all([
-      fetch('/api/folders', { headers: { 'Authorization': `Bearer ${token}` } }),
-      fetch('/api/files', { headers: { 'Authorization': `Bearer ${token}` } })
+      supabase.from('folders').select('*').eq('firm_id', user.firm_id),
+      supabase.from('files').select('*').eq('firm_id', user.firm_id)
     ]);
-    const fData = await fRes.json();
-    const fileData = await fileRes.json();
-    setFolders(fData);
-    setFiles(fileData);
+    setFolders(fRes.data || []);
+    setFiles(fileRes.data || []);
     setLoading(false);
   };
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, user]);
 
   const handleAddFolder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
-    const res = await fetch('/api/folders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ name: newFolderName })
-    });
-    const data = await res.json();
-    setFolders([...folders, data]);
-    setIsAddingFolder(false);
-    setNewFolderName('');
+    if (!token || !supabase || !user) return;
+    const { data } = await supabase.from('folders').insert([{ name: newFolderName, firm_id: user.firm_id }]).select().single();
+    if (data) {
+      setFolders([...folders, data]);
+      setIsAddingFolder(false);
+      setNewFolderName('');
+    }
   };
 
   const handleUploadFile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !selectedFolder) {
+    if (!token || !supabase || !user || !selectedFolder) {
       alert("Folder is required.");
       return;
     }
-    const res = await fetch('/api/files', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ 
-        filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
-        file_url: '#', 
-        folder_id: selectedFolder,
-        case_id: fileCaseId,
-        pending_filing: pendingFiling
-      })
-    });
-    const data = await res.json();
-    setFiles([...files, {...data, case_title: fileCaseTitle}]);
-    setUploadMode('none');
-    setFileCaseId('');
-    setFileCaseTitle('');
-    setPendingFiling(false);
-    setNewFileName('');
-    setUploadFileObj(null);
+    const { data } = await supabase.from('files').insert([{ 
+      filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
+      file_url: '#', 
+      folder_id: selectedFolder,
+      case_id: fileCaseId,
+      pending_filing: pendingFiling,
+      firm_id: user.firm_id
+    }]).select().single();
+    
+    if (data) {
+      setFiles([...files, {...data, case_title: fileCaseTitle}]);
+      setUploadMode('none');
+      setFileCaseId('');
+      setFileCaseTitle('');
+      setPendingFiling(false);
+      setNewFileName('');
+      setUploadFileObj(null);
+    }
   };
 
   const handleDeleteFolder = async (e: React.MouseEvent, folderId: string) => {
     e.stopPropagation();
-    if (!token || !confirm("Delete this folder and all its contents?")) return;
-    await fetch(`/api/folders/${folderId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this folder and all its contents?")) return;
+    await supabase.from('folders').delete().eq('id', folderId);
     setFolders(folders.filter(f => f.id !== folderId));
+    setFiles(files.filter(f => f.folder_id !== folderId));
   };
 
   const filteredFolders = folders.filter(f => (f.name || '').toLowerCase().includes((search || '').toLowerCase()));

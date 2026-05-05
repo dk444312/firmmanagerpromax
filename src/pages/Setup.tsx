@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Lock, User as UserIcon } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import bcrypt from 'bcryptjs';
 
 export default function Setup() {
   const [username, setUsername] = useState('');
@@ -20,16 +22,32 @@ export default function Setup() {
       return;
     }
 
+    if (!supabase) {
+      setError("Supabase not configured");
+      return;
+    }
+
     try {
-      const res = await fetch('/api/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, picture })
-      });
-      const data = await res.json();
+      const { data: staff, error: fetchError } = await supabase.from('staff').select('*').eq('username', username).single();
+      if (fetchError || !staff) {
+        setError("Assigned username not found. Please contact your firm administrator.");
+        return;
+      }
+
+      if (staff.status !== 'pending') {
+        setError("Account is already active.");
+        return;
+      }
+
+      const password_hash = await import('bcryptjs').then(m => m.hash(password, 10));
+      const { error: updateError } = await supabase.from('staff').update({
+        password_hash,
+        picture: picture || staff.picture,
+        status: 'active'
+      }).eq('id', staff.id);
       
-      if (!res.ok) {
-        setError(data.error || 'Setup failed');
+      if (updateError) {
+        setError(updateError.message || 'Setup failed');
         return;
       }
       

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Calendar, Clock, MapPin, Search, Edit3, Trash2, XCircle, Link as LinkIcon } from 'lucide-react';
 import CaseSelectorModal from '../components/CaseSelectorModal';
+import { supabase } from '../lib/supabase';
 
 export default function DiaryUpcoming() {
   const { user, token } = useAuth();
@@ -15,11 +16,10 @@ export default function DiaryUpcoming() {
   const [currentEvent, setCurrentEvent] = useState<any>({ id: '', title: '', description: '', date: '', time: '', type: 'Court Date', case_id: '', case_title: '' });
 
   const fetchData = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     try {
-      const res = await fetch('/api/events', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
-      setEvents(data);
+      const res = await supabase.from('events').select('*').eq('firm_id', user.firm_id);
+      setEvents(res.data || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -29,34 +29,28 @@ export default function DiaryUpcoming() {
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, user]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
-    
-    const method = isEditing ? 'PUT' : 'POST';
-    const url = isEditing ? `/api/events/${currentEvent.id}` : '/api/events';
+    if (!token || !supabase || !user) return;
     
     const payload = isEditing ? currentEvent : { ...currentEvent };
     if (!isEditing) delete (payload as any).id;
 
-    await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(payload)
-    });
+    if (isEditing) {
+      await supabase.from('events').update(payload).eq('id', currentEvent.id);
+    } else {
+      await supabase.from('events').insert([{ ...payload, firm_id: user.firm_id }]);
+    }
     
     fetchData();
     setIsModalOpen(false);
   };
 
   const handleDelete = async (id: string) => {
-    if (!token || !confirm("Delete this event?")) return;
-    await fetch(`/api/events/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this event?")) return;
+    await supabase.from('events').delete().eq('id', id);
     fetchData();
     setIsModalOpen(false);
   };

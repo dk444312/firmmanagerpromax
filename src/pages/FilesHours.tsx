@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useLocation } from 'react-router-dom';
 import { Clock, Download, Filter, Plus, FileText, CheckCircle, AlertCircle, Search, Trash, Edit, X, Calendar } from 'lucide-react';
 import CaseSelectorModal from '../components/CaseSelectorModal';
+import { supabase } from '../lib/supabase';
 
 type FilingLog = {
   id: string;
@@ -76,14 +77,14 @@ export default function Filing() {
   const [caseFiles, setCaseFiles] = useState<FirmFile[]>([]);
 
   const fetchData = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     try {
       const [filesRes, logsRes] = await Promise.all([
-        fetch('/api/files', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/filing', { headers: { 'Authorization': `Bearer ${token}` } })
+        supabase.from('files').select('*').eq('firm_id', user.firm_id),
+        supabase.from('filing_logs').select('*').eq('firm_id', user.firm_id)
       ]);
-      const fileData = await filesRes.json();
-      const logData = await logsRes.json();
+      const fileData = filesRes.data || [];
+      const logData = logsRes.data || [];
       
       if (Array.isArray(fileData)) {
         setPendingFiles(fileData.filter(f => f.pending_filing === true));
@@ -100,12 +101,11 @@ export default function Filing() {
   };
 
   const fetchFilesForCase = async (caseId: string) => {
-    if (!token || !caseId) return;
+    if (!token || !supabase || !user || !caseId) return;
     try {
-      const res = await fetch('/api/files', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setCaseFiles(data.filter(f => f.case_id === caseId));
+      const res = await supabase.from('files').select('*').eq('firm_id', user.firm_id);
+      if (res.data) {
+        setCaseFiles(res.data.filter(f => f.case_id === caseId));
       }
     } catch (e) {
       console.error(e);
@@ -114,17 +114,13 @@ export default function Filing() {
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, user]);
 
   const handleToggleFiling = async (file: FirmFile) => {
-    if (!token) return;
+    if (!token || !supabase) return;
     const newStatus = !file.pending_filing;
     
-    await fetch(`/api/files/${file.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ pending_filing: newStatus })
-    });
+    await supabase.from('files').update({ pending_filing: newStatus }).eq('id', file.id);
 
     if (!newStatus) {
       // If marked as finished (not pending anymore), prompt to log hours
@@ -148,18 +144,19 @@ export default function Filing() {
 
   const handleSaveLog = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
+    if (!token || !supabase || !user) return;
 
-    const url = isEditing ? `/api/filing/${newLog.id}` : '/api/filing';
-    const method = isEditing ? 'PUT' : 'POST';
+    let success = false;
+    if (isEditing) {
+      const { error } = await supabase.from('filing_logs').update(newLog).eq('id', newLog.id);
+      success = !error;
+    } else {
+      const { id, ...dataToSend } = newLog;
+      const { error } = await supabase.from('filing_logs').insert([{ ...dataToSend, firm_id: user.firm_id }]);
+      success = !error;
+    }
 
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(newLog)
-    });
-
-    if (res.ok) {
+    if (success) {
       setIsAdding(false);
       setIsEditing(false);
       setNewLog({ 
@@ -177,11 +174,8 @@ export default function Filing() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!token || !confirm("Delete this log entry?")) return;
-    await fetch(`/api/filing/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this log entry?")) return;
+    await supabase.from('filing_logs').delete().eq('id', id);
     fetchData();
   };
 

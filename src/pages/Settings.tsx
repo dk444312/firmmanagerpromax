@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Settings as SettingsIcon, Upload, Edit3, Key } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import bcrypt from 'bcryptjs';
 
 export default function Settings() {
   const { user, token, uiConfig, updateUiConfig } = useAuth();
   const [name, setName] = useState(user?.name || '');
-  const [picture, setPicture] = useState('');
+  const [picture, setPicture] = useState(user?.picture || '');
   const [message, setMessage] = useState('');
   const [uploading, setUploading] = useState(false);
   
@@ -29,55 +31,38 @@ export default function Settings() {
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !token) return;
+    if (!file || !token || !supabase) return;
 
     setUploading(true);
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64Content = (reader.result as string).split(',')[1];
+    try {
+      const fileName = `${Date.now()}-${file.name}`;
+      const { data, error } = await supabase.storage.from('profiles').upload(fileName, file);
       
-      try {
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({
-            bucket: 'profiles',
-            filename: file.name,
-            contentType: file.type,
-            base64Data: base64Content
-          })
-        });
-        const data = await res.json();
-        if (data.url) {
-          setPicture(data.url);
-          setMessage('Image uploaded. Please save changes.');
-        } else {
-          setMessage('Image upload failed.');
-        }
-      } catch (err) {
-        setMessage('Error uploading image.');
-      } finally {
-        setUploading(false);
+      if (error) throw error;
+      
+      if (data) {
+        const { data: { publicUrl } } = supabase.storage.from('profiles').getPublicUrl(fileName);
+        setPicture(publicUrl);
+        setMessage('Image uploaded. Please save changes.');
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error(err);
+      setMessage('Error uploading image.');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     try {
-      const res = await fetch('/api/users/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ name, picture })
-      });
-      if (res.ok) {
+      const { error } = await supabase.from('staff').update({ name, picture }).eq('id', user.id);
+      if (!error) {
         setMessage('Profile updated successfully.');
         setTimeout(() => setMessage(''), 3000);
       } else {
-        const errData = await res.json();
-        setMessage(`Failed to update profile: ${errData.error || 'Unknown error'}`);
+        setMessage(`Failed to update profile: ${error.message}`);
       }
     } catch {
       setMessage('Error updating profile.');
@@ -85,20 +70,19 @@ export default function Settings() {
   };
 
   const handleSaveConfig = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     try {
-      const res = await fetch('/api/ui_config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ ui_config: uiMap })
-      });
-      if (res.ok) {
+      if (user.role !== 'admin') {
+         setUiConfigMsg('Only admins can change UI config.');
+         return;
+      }
+      const { error } = await supabase.from('firms').update({ ui_config: uiMap }).eq('id', user.firm_id);
+      if (!error) {
         updateUiConfig(uiMap);
         setUiConfigMsg('UI Config saved successfully.');
         setTimeout(() => setUiConfigMsg(''), 3000);
       } else {
-        const errData = await res.json();
-        setUiConfigMsg(`Failed to save: ${errData.error}`);
+        setUiConfigMsg(`Failed to save: ${error.message}`);
       }
     } catch {
       setUiConfigMsg('Error saving configuration.');
@@ -107,14 +91,11 @@ export default function Settings() {
 
   const handlePasswordUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !password) return;
+    if (!token || !password || !supabase || !user) return;
     try {
-      const res = await fetch('/api/users/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ password })
-      });
-      if (res.ok) {
+      const password_hash = await import('bcryptjs').then(m => m.hash(password, 10));
+      const { error } = await supabase.from('staff').update({ password_hash }).eq('id', user.id);
+      if (!error) {
         setPassMsg('Password updated successfully.');
         setPassword('');
         setTimeout(() => setPassMsg(''), 3000);

@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import { PlusCircle, UploadCloud, CalendarPlus, Briefcase, Calendar, CheckSquare, Edit, Trash2, XCircle, Link as LinkIcon, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CaseSelectorModal from '../components/CaseSelectorModal';
+import { supabase } from '../lib/supabase';
 
 export default function Dashboard() {
   const { user, token } = useAuth();
@@ -16,50 +17,36 @@ export default function Dashboard() {
   const [currentEvent, setCurrentEvent] = useState<any>({ id: '', title: '', description: '', date: '', time: '', type: 'Court Date', case_id: '', case_title: '' });
 
   const fetchData = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     
     // Fetch dashboard data
-    fetch('/api/cases', { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => {
-        if (!Array.isArray(data)) console.error("Cases error:", data);
-        setCases(Array.isArray(data) ? data.slice(-4).reverse() : []);
-      });
-      
-    fetch('/api/events', { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => {
-        if (!Array.isArray(data)) console.error("Events error:", data);
-        setEvents(Array.isArray(data) ? data.filter((e: any) => e.date >= new Date().toISOString().split('T')[0]).sort((a: any, b: any) => a.date.localeCompare(b.date)).slice(0, 4) : []);
-      });
+    const [{ data: casesData }, { data: eventsData }, { data: tasksData }] = await Promise.all([
+      supabase.from('cases').select('*').eq('firm_id', user.firm_id),
+      supabase.from('events').select('*').eq('firm_id', user.firm_id),
+      supabase.from('tasks').select('*').eq('firm_id', user.firm_id)
+    ]);
 
-    fetch('/api/tasks', { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => {
-        if (!Array.isArray(data)) console.error("Tasks error:", data);
-        setTasks(Array.isArray(data) ? data.filter((t: any) => t.status !== 'Completed').slice(-4).reverse() : []);
-      });
+    setCases(Array.isArray(casesData) ? casesData.slice(-4).reverse() : []);
+    setEvents(Array.isArray(eventsData) ? eventsData.filter((e: any) => e.date >= new Date().toISOString().split('T')[0]).sort((a: any, b: any) => a.date.localeCompare(b.date)).slice(0, 4) : []);
+    setTasks(Array.isArray(tasksData) ? tasksData.filter((t: any) => t.status !== 'Completed').slice(-4).reverse() : []);
   };
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, user]);
   
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
-    
-    const method = isEditing ? 'PUT' : 'POST';
-    const url = isEditing ? `/api/events/${currentEvent.id}` : '/api/events';
+    if (!token || !supabase || !user) return;
     
     const payload = isEditing ? currentEvent : { ...currentEvent };
     if (!isEditing) delete (payload as any).id;
 
-    await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(payload)
-    });
+    if (isEditing) {
+      await supabase.from('events').update(payload).eq('id', currentEvent.id);
+    } else {
+      await supabase.from('events').insert([{ ...payload, firm_id: user.firm_id }]);
+    }
     
     fetchData();
     setIsModalOpen(false);
@@ -67,11 +54,8 @@ export default function Dashboard() {
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!token || !confirm("Delete this event?")) return;
-    await fetch(`/api/events/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this event?")) return;
+    await supabase.from('events').delete().eq('id', id);
     fetchData();
   };
 

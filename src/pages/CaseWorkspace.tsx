@@ -2,19 +2,19 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Briefcase, Search } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
 
 export default function CaseWorkspace() {
   const navigate = useNavigate();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [cases, setCases] = useState<any[]>([]);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    if (!token) return;
-    fetch('/api/cases', { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => setCases(Array.isArray(data) ? data : []));
-  }, [token]);
+    if (!token || !supabase || !user) return;
+    supabase.from('cases').select('*').eq('firm_id', user.firm_id)
+      .then(res => setCases(res.data || []));
+  }, [token, user]);
 
   const filtered = cases.filter(c => c.title?.toLowerCase().includes(search.toLowerCase()) || c.case_number?.toLowerCase().includes(search.toLowerCase()));
 

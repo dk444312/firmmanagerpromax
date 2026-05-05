@@ -3,10 +3,11 @@ import { useAuth } from '../hooks/useAuth';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, BookOpen, Clock, Users, ArrowRightCircle, CheckSquare, FileText, Edit } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 export default function CaseDetails() {
   const { id } = useParams();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -18,15 +19,12 @@ export default function CaseDetails() {
   const [editData, setEditData] = useState<any>(null);
 
   const fetchCase = async () => {
-    if (!token) return;
+    if (!token || !supabase) return;
     try {
-      const res = await fetch(`/api/cases/${id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
-        setNewStage(json.stage || 'Pre-trial');
+      const { data: resData, error } = await supabase.from('cases').select('*').eq('id', id).single();
+      if (!error && resData) {
+        setData(resData);
+        setNewStage(resData.stage || 'Pre-trial');
       }
     } finally {
       setLoading(false);
@@ -38,33 +36,22 @@ export default function CaseDetails() {
   }, [id, token]);
 
   const updateStage = async () => {
-    if (!token) return;
-    await fetch(`/api/cases/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ stage: newStage })
-    });
+    if (!token || !supabase) return;
+    await supabase.from('cases').update({ stage: newStage }).eq('id', id);
     fetchCase();
   };
 
   const handleEditSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
-    await fetch(`/api/cases/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(editData)
-    });
+    if (!token || !supabase) return;
+    await supabase.from('cases').update(editData).eq('id', id);
     setIsEditingMeta(false);
     fetchCase();
   };
 
   const handleDelete = async () => {
-    if (!token || !confirm("CRITICAL: Delete this matter? All data associated with this matter will be lost.")) return;
-    await fetch(`/api/cases/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("CRITICAL: Delete this matter? All data associated with this matter will be lost.")) return;
+    await supabase.from('cases').delete().eq('id', id);
     navigate('/cases');
   };
 

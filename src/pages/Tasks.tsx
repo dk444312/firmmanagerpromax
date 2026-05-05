@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { CheckCircle2, Clock, PlayCircle, XCircle, Plus, Search, Link as LinkIcon, Trash, Edit3 } from 'lucide-react';
 import CaseSelectorModal from '../components/CaseSelectorModal';
+import { supabase } from '../lib/supabase';
 
 type Task = {
   id: string;
@@ -36,16 +37,14 @@ export default function Tasks() {
   const STAGES = ['Pending', 'In Progress', 'Completed', 'Cancelled'];
 
   const fetchData = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     try {
       const [tasksRes, staffRes] = await Promise.all([
-        fetch('/api/tasks', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/staff', { headers: { 'Authorization': `Bearer ${token}` } })
+        supabase.from('tasks').select('*').eq('firm_id', user.firm_id),
+        supabase.from('staff').select('*').eq('firm_id', user.firm_id)
       ]);
-      const tasksData = await tasksRes.json();
-      const staffData = await staffRes.json();
-      if (Array.isArray(tasksData)) setTasks(tasksData);
-      if (Array.isArray(staffData)) setStaff(staffData);
+      if (tasksRes.data) setTasks(tasksRes.data);
+      if (staffRes.data) setStaff(staffRes.data);
     } catch (e) {
       console.error(e);
     } finally {
@@ -55,36 +54,25 @@ export default function Tasks() {
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, user]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     
     if (isEditing) {
-      await fetch(`/api/tasks/${currentTask.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(currentTask)
-      });
+      await supabase.from('tasks').update(currentTask).eq('id', currentTask.id);
     } else {
       const { id, ...dataToSend } = currentTask;
-      await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(dataToSend)
-      });
+      await supabase.from('tasks').insert([{ ...dataToSend, firm_id: user.firm_id }]);
     }
     fetchData();
     setIsModalOpen(false);
   };
 
   const handleDelete = async (id: string) => {
-    if (!token || !confirm("Delete this task?")) return;
-    await fetch(`/api/tasks/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this task?")) return;
+    await supabase.from('tasks').delete().eq('id', id);
     fetchData();
   };
 

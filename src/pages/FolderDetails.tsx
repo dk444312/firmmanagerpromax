@@ -4,13 +4,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { FolderOpen, ArrowLeft, FileText, Download, Trash, Search, Upload, XCircle, Link as LinkIcon, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 import CaseSelectorModal from '../components/CaseSelectorModal';
+import { supabase } from '../lib/supabase';
 
 type FirmFile = { id: string; filename: string; file_url: string; folder_id: string; created_at: string; case_id?: string; case_title?: string; pending_filing?: boolean; status?: string };
 
 export default function FolderDetails() {
   const { folderId } = useParams();
   const navigate = useNavigate();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   
   const [folderName, setFolderName] = useState('');
   const [files, setFiles] = useState<FirmFile[]>([]);
@@ -26,7 +27,7 @@ export default function FolderDetails() {
   const [uploadFileObj, setUploadFileObj] = useState<File | null>(null);
 
   const fetchFolderContent = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     if (!folderId) {
        console.error("Missing folderId");
        setLoading(false);
@@ -35,18 +36,12 @@ export default function FolderDetails() {
     
     try {
       const [fRes, fileRes] = await Promise.all([
-        fetch('/api/folders', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/files', { headers: { 'Authorization': `Bearer ${token}` } })
+        supabase.from('folders').select('*').eq('firm_id', user.firm_id),
+        supabase.from('files').select('*').eq('folder_id', folderId).eq('firm_id', user.firm_id)
       ]);
       
-      if (!fRes.ok || !fileRes.ok) throw new Error("Fetch failed");
-
-      const fData = await fRes.json();
-      const fileData = await fileRes.json();
-      
-      if (!Array.isArray(fData) || !Array.isArray(fileData)) {
-        throw new Error("Invalid API response format");
-      }
+      const fData = fRes.data || [];
+      const fileData = fileRes.data || [];
       
       const folder = fData.find((f: any) => f.id === folderId);
       if (folder) {
@@ -55,7 +50,7 @@ export default function FolderDetails() {
         console.warn("Folder not found in fetched list", folderId);
       }
       
-      setFiles(fileData.filter((f: any) => f.folder_id === folderId));
+      setFiles(fileData);
     } catch (e) {
       console.error("Error fetching folder content:", e);
       alert("Failed to load folder contents. Please try refreshing.");
@@ -66,25 +61,18 @@ export default function FolderDetails() {
 
   useEffect(() => {
     fetchFolderContent();
-  }, [token, folderId]);
+  }, [token, folderId, user]);
 
   const handleDelete = async (fileId: string) => {
-    if (!token || !confirm("Delete this file?")) return;
-    await fetch(`/api/files/${fileId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this file?")) return;
+    await supabase.from('files').delete().eq('id', fileId);
     fetchFolderContent();
   };
 
   const handleToggleFiling = async (file: FirmFile) => {
-    if (!token) return;
+    if (!token || !supabase) return;
     const newStatus = !file.pending_filing;
-    await fetch(`/api/files/${file.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ pending_filing: newStatus })
-    });
+    await supabase.from('files').update({ pending_filing: newStatus }).eq('id', file.id);
 
     if (!newStatus) {
       if (confirm(`Document "${file.filename}" marked as filed. Would you like to log your filing hours now?`)) {
@@ -102,29 +90,28 @@ export default function FolderDetails() {
 
   const handleUploadFile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !folderId) {
+    if (!token || !supabase || !user || !folderId) {
       alert("Missing folder information.");
       return;
     }
-    const res = await fetch('/api/files', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ 
-        filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
-        file_url: '#', 
-        folder_id: folderId,
-        case_id: fileCaseId,
-        pending_filing: pendingFiling
-      })
-    });
-    const data = await res.json();
-    setFiles([...files, {...data, case_title: fileCaseTitle}]);
-    setUploadMode('none');
-    setFileCaseId('');
-    setFileCaseTitle('');
-    setPendingFiling(false);
-    setNewFileName('');
-    setUploadFileObj(null);
+    const { data } = await supabase.from('files').insert([{ 
+      filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
+      file_url: '#', 
+      folder_id: folderId,
+      case_id: fileCaseId,
+      pending_filing: pendingFiling,
+      firm_id: user.firm_id
+    }]).select().single();
+    
+    if (data) {
+      setFiles([...files, {...data, case_title: fileCaseTitle}]);
+      setUploadMode('none');
+      setFileCaseId('');
+      setFileCaseTitle('');
+      setPendingFiling(false);
+      setNewFileName('');
+      setUploadFileObj(null);
+    }
   };
 
   const filtered = files.filter(f => (f.filename || '').toLowerCase().includes(search.toLowerCase()));

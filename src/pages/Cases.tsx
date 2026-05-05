@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { Search, Plus, Trash2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 type CaseData = {
   id: string;
@@ -41,18 +42,21 @@ export default function Cases() {
   });
 
   useEffect(() => {
-    if (!token) return;
-    fetch('/api/cases', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    .then(res => res.json())
-    .then(data => setCases(Array.isArray(data) ? data : []))
-    .finally(() => setLoading(false));
-  }, [token]);
+    if (!token || !supabase || !user) return;
+    
+    supabase
+      .from('cases')
+      .select('*')
+      .eq('firm_id', user.firm_id)
+      .then(({ data }) => {
+        setCases(Array.isArray(data) ? data : []);
+        setLoading(false);
+      });
+  }, [token, user]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     
     let finalTitle = newForm.title;
     if (titleMode === 'auto') {
@@ -63,29 +67,34 @@ export default function Cases() {
       finalTitle = newForm.defendant;
     }
 
-    const res = await fetch('/api/cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ ...newForm, title: finalTitle || 'Untitled Matter' })
-    });
-    const created = await res.json();
-    setCases([...cases, created]);
-    setIsAdding(false);
-    setTitleMode('auto');
-    setNewForm({
-      title: '', description: '', claimant: '', defendant: '', case_number: '', 
-      court: COURTS[0], specific_court_other: '', registry_court: '', judge_name: '', 
-      brief_facts: '', status: 'Active', stage: 'Pre-trial'
-    });
+    const { data: created, error } = await supabase
+      .from('cases')
+      .insert([{ 
+        ...newForm, 
+        title: finalTitle || 'Untitled Matter',
+        firm_id: user.firm_id,
+        assigned_staff_ids: [user.id]
+      }])
+      .select()
+      .single();
+
+    if (created && !error) {
+      setCases([...cases, created]);
+      setIsAdding(false);
+      setTitleMode('auto');
+      setNewForm({
+        title: '', description: '', claimant: '', defendant: '', case_number: '', 
+        court: COURTS[0], specific_court_other: '', registry_court: '', judge_name: '', 
+        brief_facts: '', status: 'Active', stage: 'Pre-trial'
+      });
+    }
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!token || !confirm("Delete this case? This will remove all associated logs and records.")) return;
-    await fetch(`/api/cases/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this case? This will remove all associated logs and records.")) return;
+    
+    await supabase.from('cases').delete().eq('id', id);
     setCases(cases.filter(c => c.id !== id));
   };
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Calendar as CalendarIcon, Search, Plus, Clock, Link as LinkIcon, XCircle, ChevronLeft, ChevronRight, Edit3, Trash2 } from 'lucide-react';
 import CaseSelectorModal from '../components/CaseSelectorModal';
+import { supabase } from '../lib/supabase';
 
 type FirmEvent = {
   id: string;
@@ -39,16 +40,14 @@ export default function Diary() {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const fetchData = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     try {
       const [evRes, taskRes] = await Promise.all([
-        fetch('/api/events', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/tasks', { headers: { 'Authorization': `Bearer ${token}` } })
+        supabase.from('events').select('*').eq('firm_id', user.firm_id),
+        supabase.from('tasks').select('*').eq('firm_id', user.firm_id)
       ]);
-      const evData = await evRes.json();
-      const taskData = await taskRes.json();
-      setEvents(evData);
-      setTasks(taskData);
+      setEvents(evRes.data || []);
+      setTasks(taskRes.data || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -58,35 +57,29 @@ export default function Diary() {
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, user]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
-    
-    const method = isEditing ? 'PUT' : 'POST';
-    const url = isEditing ? `/api/events/${currentEvent.id}` : '/api/events';
+    if (!token || !supabase || !user) return;
     
     // For creation, omit the ID if it's empty
     const payload = isEditing ? currentEvent : { ...currentEvent };
     if (!isEditing) delete (payload as any).id;
 
-    await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(payload)
-    });
+    if (isEditing) {
+      await supabase.from('events').update(payload).eq('id', currentEvent.id);
+    } else {
+      await supabase.from('events').insert([{ ...payload, firm_id: user.firm_id }]);
+    }
     
     fetchData();
     setIsModalOpen(false);
   };
 
   const handleDelete = async (id: string) => {
-    if (!token || !confirm("Delete this event?")) return;
-    await fetch(`/api/events/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    if (!token || !supabase || !confirm("Delete this event?")) return;
+    await supabase.from('events').delete().eq('id', id);
     fetchData();
   };
 

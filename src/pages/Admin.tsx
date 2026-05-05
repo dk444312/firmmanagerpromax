@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { supabase } from '../lib/supabase';
 
 type StaffDTO = {
   id: string;
@@ -97,18 +98,17 @@ export default function Admin() {
   } | null>(null);
 
   const fetchData = async () => {
-    if (!token) return;
+    if (!token || !supabase || !user) return;
     try {
       const [staffRes, casesRes, foldersRes] = await Promise.all([
-        fetch('/api/staff', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/cases', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/folders', { headers: { 'Authorization': `Bearer ${token}` } })
+        supabase.from('staff').select('*').eq('firm_id', user.firm_id),
+        supabase.from('cases').select('*').eq('firm_id', user.firm_id),
+        supabase.from('folders').select('*').eq('firm_id', user.firm_id)
       ]);
-      const [staffData, casesData, foldersData] = await Promise.all([
-        staffRes.json(),
-        casesRes.json(),
-        foldersRes.json()
-      ]);
+      const staffData = staffRes.data || [];
+      const casesData = casesRes.data || [];
+      const foldersData = foldersRes.data || [];
+      
       if (Array.isArray(staffData)) setStaff(staffData);
       if (Array.isArray(casesData)) setCases(casesData.map((c: any) => ({ id: c.id, name: c.title })));
       if (Array.isArray(foldersData)) setFolders(foldersData.map((f: any) => ({ id: f.id, name: f.name })));
@@ -121,10 +121,10 @@ export default function Admin() {
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, user]);
 
   const updatePermissions = async (staffId: string, updates: Partial<StaffDTO>) => {
-    if (!token) return;
+    if (!token || !supabase) return;
     
     // Optimistic UI update
     setStaff(prev => prev.map(s => s.id === staffId ? { ...s, ...updates } : s));
@@ -133,16 +133,13 @@ export default function Admin() {
       const s = staff.find(sm => sm.id === staffId);
       if (!s) return;
 
-      await fetch(`/api/staff/${staffId}/permissions`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ 
-          accessible_menus: updates.accessible_menus || s.accessible_menus,
-          case_access_mode: updates.case_access_mode || s.case_access_mode,
-          allowed_cases: updates.allowed_cases || s.allowed_cases,
-          allowed_folders: updates.allowed_folders || s.allowed_folders
-        })
+      Object.keys(updates).forEach(key => {
+        if (updates[key as keyof StaffDTO] === undefined) {
+          delete updates[key as keyof StaffDTO];
+        }
       });
+
+      await supabase.from('staff').update(updates).eq('id', staffId);
     } catch (e) {
       fetchData();
     }
