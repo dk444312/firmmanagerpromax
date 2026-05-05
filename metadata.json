@@ -1,0 +1,6 @@
+{
+  "name": "Engine Room Dashboard",
+  "description": "A dark-themed staff dashboard for a law firm with role-based unified navigation, case management, diary, and document vault, built with a Supabase PostgreSQL schema.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
