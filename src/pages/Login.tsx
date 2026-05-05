@@ -21,7 +21,14 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
-      const data = await res.json();
+      
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        setError('Server returned invalid response');
+        return;
+      }
       
       if (!res.ok) {
         setError(data.error || 'Login failed');
@@ -31,7 +38,8 @@ export default function Login() {
       login(data.token, data.user);
       navigate('/dashboard');
     } catch (err) {
-      setError('Connection error');
+      console.error("Login fetch error:", err);
+      setError('Connection error: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
   };
 
@@ -39,7 +47,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]">
       <div className="bg-[#151619] border border-white/5 p-8 rounded-xl w-full max-w-md shadow-2xl">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold tracking-tight text-white content-center mb-2">ENGINE ROOM</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white content-center mb-2">FirmManager</h1>
           <p className="text-slate-400 text-sm tracking-wide">Enter your credentials to access the firm</p>
         </div>
         

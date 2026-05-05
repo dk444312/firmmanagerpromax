@@ -64,7 +64,7 @@ export default function Layout() {
       {/* Sidebar sidebar: #121212 with subtle white border-right */}
       <aside className="w-64 bg-[#121212] border-r border-white/10 flex flex-col flex-shrink-0">
         <div className="p-6">
-          <h1 className="text-xl font-semibold text-emerald-500 tracking-wide">ENGINE ROOM</h1>
+          <h1 className="text-xl font-semibold text-emerald-500 tracking-wide">FirmManager</h1>
           <p className="text-xs text-slate-400 mt-1 uppercase tracking-wider">{user.role}</p>
         </div>
         

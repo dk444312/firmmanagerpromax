@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Calendar, Clock, Search, Edit3, Trash2, XCircle, Link as LinkIcon } from 'lucide-react';
 import CaseSelectorModal from '../components/CaseSelectorModal';

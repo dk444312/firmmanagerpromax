@@ -1,7 +1,7 @@
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { PlusCircle, UploadCloud, CalendarPlus, Briefcase, Calendar, CheckSquare, Edit, Trash2, XCircle, Link as LinkIcon, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
 import CaseSelectorModal from '../components/CaseSelectorModal';
 
 export default function Dashboard() {
