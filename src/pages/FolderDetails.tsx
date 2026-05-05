@@ -98,7 +98,7 @@ export default function FolderDetails() {
       filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
       file_url: '#', 
       folder_id: folderId,
-      case_id: fileCaseId,
+      case_id: fileCaseId || null,
       pending_filing: pendingFiling,
       firm_id: user.firm_id
     }]).select().single();

@@ -70,7 +70,7 @@ export default function Files() {
       filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
       file_url: '#', 
       folder_id: selectedFolder,
-      case_id: fileCaseId,
+      case_id: fileCaseId || null,
       pending_filing: pendingFiling,
       firm_id: user.firm_id
     }]).select().single();

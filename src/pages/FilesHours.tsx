@@ -146,13 +146,20 @@ export default function Filing() {
     e.preventDefault();
     if (!token || !supabase || !user) return;
 
+    const payload = { ...newLog } as any;
+    if (!payload.case_id) {
+       payload.case_id = null;
+       payload.case_title = null;
+    }
+    if (!payload.file_id) payload.file_id = null;
+
     let success = false;
     if (isEditing) {
-      const { error } = await supabase.from('filing_logs').update(newLog).eq('id', newLog.id);
+      const { error } = await supabase.from('filing_logs').update(payload).eq('id', newLog.id);
       success = !error;
     } else {
-      const { id, ...dataToSend } = newLog;
-      const { error } = await supabase.from('filing_logs').insert([{ ...dataToSend, firm_id: user.firm_id }]);
+      delete payload.id;
+      const { error } = await supabase.from('filing_logs').insert([{ ...payload, firm_id: user.firm_id }]);
       success = !error;
     }
 

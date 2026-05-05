@@ -39,8 +39,12 @@ export default function Dashboard() {
     e.preventDefault();
     if (!token || !supabase || !user) return;
     
-    const payload = isEditing ? currentEvent : { ...currentEvent };
-    if (!isEditing) delete (payload as any).id;
+    const payload = { ...currentEvent } as any;
+    if (!payload.case_id) {
+       payload.case_id = null;
+       payload.case_title = null;
+    }
+    if (!isEditing) delete payload.id;
 
     if (isEditing) {
       await supabase.from('events').update(payload).eq('id', currentEvent.id);

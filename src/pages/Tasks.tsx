@@ -60,11 +60,17 @@ export default function Tasks() {
     e.preventDefault();
     if (!token || !supabase || !user) return;
     
+    const payload = { ...currentTask } as any;
+    if (!payload.case_id) {
+      payload.case_id = null;
+      payload.case_title = null;
+    }
+    
     if (isEditing) {
-      await supabase.from('tasks').update(currentTask).eq('id', currentTask.id);
+      await supabase.from('tasks').update(payload).eq('id', currentTask.id);
     } else {
-      const { id, ...dataToSend } = currentTask;
-      await supabase.from('tasks').insert([{ ...dataToSend, firm_id: user.firm_id }]);
+      delete payload.id;
+      await supabase.from('tasks').insert([{ ...payload, firm_id: user.firm_id }]);
     }
     fetchData();
     setIsModalOpen(false);
