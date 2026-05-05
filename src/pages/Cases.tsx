@@ -79,6 +79,13 @@ export default function Cases() {
       .single();
 
     if (created && !error) {
+      // Auto-create folder for the case
+      await supabase.from('folders').insert([{ 
+        name: created.title || 'Case Folder', 
+        firm_id: user.firm_id, 
+        case_id: created.id 
+      }]);
+
       setCases([...cases, created]);
       setIsAdding(false);
       setTitleMode('auto');
