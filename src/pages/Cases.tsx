@@ -36,10 +36,12 @@ export default function Cases() {
   const [isAdding, setIsAdding] = useState(false);
   const [titleMode, setTitleMode] = useState('auto'); // auto, claimant, defendant, custom
   const [newForm, setNewForm] = useState({
-    title: '', description: '', claimant: '', defendant: '', case_number: '', 
+    title: '', description: '', case_number: '', 
     court: COURTS[0], specific_court_other: '', registry_court: '', judge_name: '', 
     brief_facts: '', status: 'Active', stage: 'Pre-trial'
   });
+  const [claimants, setClaimants] = useState<string[]>(['']);
+  const [defendants, setDefendants] = useState<string[]>(['']);
 
   useEffect(() => {
     if (!token || !supabase || !user) return;
@@ -58,19 +60,26 @@ export default function Cases() {
     e.preventDefault();
     if (!token || !supabase || !user) return;
     
+    const validClaimants = claimants.filter(c => c.trim() !== '');
+    const validDefendants = defendants.filter(d => d.trim() !== '');
+    const claimantStr = validClaimants.join(', ') || 'Unknown';
+    const defendantStr = validDefendants.join(', ') || 'Unknown';
+
     let finalTitle = newForm.title;
     if (titleMode === 'auto') {
-      finalTitle = `${newForm.claimant || 'Unknown'} v. ${newForm.defendant || 'Unknown'}`;
+      finalTitle = `${claimantStr} v. ${defendantStr}`;
     } else if (titleMode === 'claimant') {
-      finalTitle = newForm.claimant;
+      finalTitle = claimantStr;
     } else if (titleMode === 'defendant') {
-      finalTitle = newForm.defendant;
+      finalTitle = defendantStr;
     }
 
     const { data: created, error } = await supabase
       .from('cases')
       .insert([{ 
         ...newForm, 
+        claimant: claimantStr,
+        defendant: defendantStr,
         title: finalTitle || 'Untitled Matter',
         firm_id: user.firm_id,
         assigned_staff_ids: [user.id]
@@ -90,10 +99,12 @@ export default function Cases() {
       setIsAdding(false);
       setTitleMode('auto');
       setNewForm({
-        title: '', description: '', claimant: '', defendant: '', case_number: '', 
+        title: '', description: '', case_number: '', 
         court: COURTS[0], specific_court_other: '', registry_court: '', judge_name: '', 
         brief_facts: '', status: 'Active', stage: 'Pre-trial'
       });
+      setClaimants(['']);
+      setDefendants(['']);
     }
   };
 
@@ -150,12 +161,44 @@ export default function Cases() {
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Claimant</label>
-                  <input required type="text" value={newForm.claimant} onChange={e => setNewForm({...newForm, claimant: e.target.value})} className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white" />
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Claimants</label>
+                  {claimants.map((c, i) => (
+                    <div key={i} className="flex gap-2 mb-2">
+                       <input 
+                         required={i === 0}
+                         type="text" 
+                         value={c} 
+                         onChange={e => {
+                           const newC = [...claimants];
+                           newC[i] = e.target.value;
+                           setClaimants(newC);
+                         }} 
+                         className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white" 
+                       />
+                       {i > 0 && <button type="button" onClick={() => setClaimants(claimants.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-300 px-2"><Trash2 className="w-4 h-4" /></button>}
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setClaimants([...claimants, ''])} className="text-emerald-500 hover:text-emerald-400 text-xs font-medium flex items-center gap-1 mt-1"><Plus className="w-3 h-3" /> Add Claimant</button>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Defendant</label>
-                  <input required type="text" value={newForm.defendant} onChange={e => setNewForm({...newForm, defendant: e.target.value})} className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white" />
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Defendants</label>
+                  {defendants.map((d, i) => (
+                    <div key={i} className="flex gap-2 mb-2">
+                       <input 
+                         required={i === 0}
+                         type="text" 
+                         value={d} 
+                         onChange={e => {
+                           const newD = [...defendants];
+                           newD[i] = e.target.value;
+                           setDefendants(newD);
+                         }} 
+                         className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white" 
+                       />
+                       {i > 0 && <button type="button" onClick={() => setDefendants(defendants.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-300 px-2"><Trash2 className="w-4 h-4" /></button>}
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setDefendants([...defendants, ''])} className="text-emerald-500 hover:text-emerald-400 text-xs font-medium flex items-center gap-1 mt-1"><Plus className="w-3 h-3" /> Add Defendant</button>
                 </div>
               </div>
 

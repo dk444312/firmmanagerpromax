@@ -242,7 +242,12 @@ export default function FolderDetails() {
                 <tr key={file.id} className="hover:bg-white/[0.02] transition-colors group">
                   <td className="py-4 pl-4 flex items-center gap-3">
                     <FileText className="w-5 h-5 text-emerald-500" />
-                    <span className="text-sm text-white font-medium">{file.filename}</span>
+                    <button 
+                      onClick={() => { if(file.file_url && file.file_url !== '#') window.open(file.file_url, '_blank'); else alert('No file attached.'); }}
+                      className="text-sm text-white font-medium hover:text-emerald-400 hover:underline text-left transition-colors"
+                    >
+                      {file.filename}
+                    </button>
                   </td>
                   <td className="py-4 text-xs font-medium">
                     <span className={`px-3 py-1 rounded-full ${

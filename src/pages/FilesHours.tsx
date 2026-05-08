@@ -317,7 +317,12 @@ export default function Filing() {
                       <FileText className="w-5 h-5 text-emerald-500" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-medium text-white truncate max-w-[150px]">{file.filename}</h4>
+                      <button 
+                        onClick={() => { if(file.file_url && file.file_url !== '#') window.open(file.file_url, '_blank'); else alert('No file attached.'); }}
+                        className="text-sm font-medium text-white truncate max-w-[150px] hover:text-emerald-400 hover:underline text-left transition-colors"
+                      >
+                        {file.filename}
+                      </button>
                       <p className="text-[10px] text-slate-500">Added {new Date(file.created_at).toLocaleDateString()}</p>
                     </div>
                   </div>
@@ -368,7 +373,12 @@ export default function Filing() {
                         <FileText className="w-5 h-5 text-emerald-500" />
                       </div>
                       <div>
-                        <h4 className="text-sm font-medium text-white truncate max-w-[150px]">{file.filename}</h4>
+                        <button 
+                          onClick={() => { if(file.file_url && file.file_url !== '#') window.open(file.file_url, '_blank'); else alert('No file attached.'); }}
+                          className="text-sm font-medium text-white truncate max-w-[150px] hover:text-emerald-400 hover:underline text-left transition-colors"
+                        >
+                          {file.filename}
+                        </button>
                         <p className="text-[10px] text-slate-500 font-mono">Filed {new Date(file.created_at).toLocaleDateString()}</p>
                       </div>
                     </div>

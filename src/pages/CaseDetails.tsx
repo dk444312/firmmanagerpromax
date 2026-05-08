@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, BookOpen, Clock, Users, ArrowRightCircle, CheckSquare, FileText, Edit } from 'lucide-react';
+import { ArrowLeft, BookOpen, Clock, Users, ArrowRightCircle, CheckSquare, FileText, Edit, Trash2, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 export default function CaseDetails() {
@@ -228,12 +228,54 @@ export default function CaseDetails() {
             <form onSubmit={handleEditSave} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Claimant</label>
-                   <input type="text" value={editData.claimant} onChange={e => setEditData({...editData, claimant: e.target.value})} className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white" />
+                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Claimants</label>
+                   {editData.claimant.split(',').map((c: string, i: number) => (
+                     <div key={`c-${i}`} className="flex gap-2 mb-2">
+                       <input 
+                         type="text" 
+                         value={c.trim()} 
+                         onChange={e => {
+                           const arr = editData.claimant.split(',').map((s: string) => s.trim());
+                           arr[i] = e.target.value;
+                           setEditData({...editData, claimant: arr.join(', ')})
+                         }} 
+                         className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white" 
+                       />
+                       {i > 0 && <button type="button" onClick={() => {
+                          const arr = editData.claimant.split(',').map((s: string) => s.trim()).filter((_: any, idx: number) => idx !== i);
+                          setEditData({...editData, claimant: arr.join(', ')});
+                       }} className="text-red-400 hover:text-red-300 px-2"><Trash2 className="w-4 h-4" /></button>}
+                     </div>
+                   ))}
+                   <button type="button" onClick={() => {
+                     const currentStr = editData.claimant ? editData.claimant + ', ' : '';
+                     setEditData({...editData, claimant: currentStr});
+                   }} className="text-emerald-500 hover:text-emerald-400 text-xs font-medium flex items-center gap-1 mt-1"><Plus className="w-3 h-3" /> Add Claimant</button>
                 </div>
                 <div>
-                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Defendant</label>
-                   <input type="text" value={editData.defendant} onChange={e => setEditData({...editData, defendant: e.target.value})} className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white" />
+                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Defendants</label>
+                   {editData.defendant.split(',').map((d: string, i: number) => (
+                     <div key={`d-${i}`} className="flex gap-2 mb-2">
+                       <input 
+                         type="text" 
+                         value={d.trim()} 
+                         onChange={e => {
+                           const arr = editData.defendant.split(',').map((s: string) => s.trim());
+                           arr[i] = e.target.value;
+                           setEditData({...editData, defendant: arr.join(', ')})
+                         }} 
+                         className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white" 
+                       />
+                       {i > 0 && <button type="button" onClick={() => {
+                          const arr = editData.defendant.split(',').map((s: string) => s.trim()).filter((_: any, idx: number) => idx !== i);
+                          setEditData({...editData, defendant: arr.join(', ')});
+                       }} className="text-red-400 hover:text-red-300 px-2"><Trash2 className="w-4 h-4" /></button>}
+                     </div>
+                   ))}
+                   <button type="button" onClick={() => {
+                     const currentStr = editData.defendant ? editData.defendant + ', ' : '';
+                     setEditData({...editData, defendant: currentStr});
+                   }} className="text-emerald-500 hover:text-emerald-400 text-xs font-medium flex items-center gap-1 mt-1"><Plus className="w-3 h-3" /> Add Defendant</button>
                 </div>
                 <div>
                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Court</label>
