@@ -114,14 +114,19 @@ export default function Diary() {
   for (let i = 1; i <= daysInMonth; i++) {
     days.push(i);
   }
+  
+  const remainingCells = 42 - days.length;
+  for (let i = 0; i < remainingCells; i++) {
+    days.push(null);
+  }
 
   const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   const monthName = currentDate.toLocaleString('default', { month: 'long', year: 'numeric' });
 
   return (
-    <div className="p-10 max-w-7xl mx-auto h-full flex flex-col">
-      <header className="mb-10 flex justify-between items-end">
+    <div className="p-10 max-w-7xl mx-auto h-full overflow-y-auto flex flex-col">
+      <header className="mb-10 flex flex-shrink-0 justify-between items-end">
         <div>
           <h1 className="text-4xl font-light text-white tracking-tight flex items-center gap-4">
             <CalendarIcon className="w-8 h-8 text-emerald-500" />
@@ -225,7 +230,7 @@ export default function Diary() {
         />
       )}
 
-      <div className="bg-[#151619] border border-white/10 rounded-2xl flex-1 flex flex-col overflow-hidden shadow-lg">
+      <div className="bg-[#151619] border border-white/10 rounded-2xl flex-shrink-0 flex flex-col shadow-lg mb-10">
         <div className="p-4 border-b border-white/5 bg-[#1a1c20] flex items-center justify-between">
           <h2 className="text-xl font-medium text-white">{monthName}</h2>
           <div className="flex items-center gap-2">
@@ -241,9 +246,9 @@ export default function Diary() {
           ))}
         </div>
 
-        <div className="flex-1 grid grid-cols-7 grid-rows-5 bg-white/5 gap-[1px]">
+        <div className="flex-1 grid grid-cols-7 grid-rows-6 bg-white/5 gap-[1px]">
           {days.map((day, idx) => {
-            if (!day) return <div key={`empty-${idx}`} className="bg-[#151619]" />;
+            if (!day) return <div key={`empty-${idx}`} className="bg-[#151619] min-h-[120px]" />;
             
             // Format check for 'YYYY-MM-DD'
             const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth()+1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -252,7 +257,7 @@ export default function Diary() {
             const isToday = new Date().toISOString().split('T')[0] === dateStr;
 
             return (
-              <div key={day} className="bg-[#151619] p-2 overflow-y-auto hover:bg-[#1a1c20] transition-colors relative group min-h-[100px]">
+              <div key={day} className="bg-[#151619] p-2 overflow-y-auto hover:bg-[#1a1c20] transition-colors relative group min-h-[120px]">
                 <div className={`text-sm font-medium w-7 h-7 flex items-center justify-center rounded-sm mb-1 ${isToday ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>
                   {day}
                 </div>

@@ -66,9 +66,20 @@ export default function Files() {
       alert("Folder is required.");
       return;
     }
+
+    let fileUrl = '#';
+    if (uploadFileObj) {
+      const fileName = `${Date.now()}-${uploadFileObj.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const { data, error } = await supabase.storage.from('files').upload(fileName, uploadFileObj);
+      if (!error && data) {
+        const { data: { publicUrl } } = supabase.storage.from('files').getPublicUrl(fileName);
+        fileUrl = publicUrl;
+      }
+    }
+
     const { data } = await supabase.from('files').insert([{ 
       filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
-      file_url: '#', 
+      file_url: fileUrl, 
       folder_id: selectedFolder,
       case_id: fileCaseId || null,
       pending_filing: pendingFiling,

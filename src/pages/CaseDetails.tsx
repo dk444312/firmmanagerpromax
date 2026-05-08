@@ -55,6 +55,13 @@ export default function CaseDetails() {
     navigate('/cases');
   };
 
+  const toggleCaseStatus = async () => {
+    if (!token || !supabase) return;
+    const newStatus = data?.status === 'Closed' ? 'Active' : 'Closed';
+    await supabase.from('cases').update({ status: newStatus }).eq('id', id);
+    fetchCase();
+  };
+
   if (loading) return <div className="p-10 text-emerald-500">Loading case workspace...</div>;
   if (!data) return <div className="p-10 text-red-400">Matter not found.</div>;
 
@@ -69,15 +76,20 @@ export default function CaseDetails() {
           <div>
             <div className="flex items-center gap-4 mb-2">
               <span className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs font-mono text-slate-300">{data.case_number || 'No Case Number'}</span>
-              <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider ${data.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-400 border border-white/10'}`}>
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider ${data.status === 'Closed' ? 'bg-slate-800 text-slate-400 border border-white/10' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
                 {data.status || 'Active'}
               </span>
             </div>
             <h1 className="text-4xl font-semibold text-white tracking-tight">{data.title}</h1>
           </div>
-          <button onClick={handleDelete} className="bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-            Delete Matter
-          </button>
+          <div className="flex gap-3">
+            <button onClick={toggleCaseStatus} className="bg-white/5 border border-white/10 text-white hover:bg-white/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+              Mark {data.status === 'Closed' ? 'Active' : 'Closed'}
+            </button>
+            <button onClick={handleDelete} className="bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+              Delete Matter
+            </button>
+          </div>
         </div>
       </header>
 

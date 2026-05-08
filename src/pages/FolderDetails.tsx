@@ -94,9 +94,20 @@ export default function FolderDetails() {
       alert("Missing folder information.");
       return;
     }
+    
+    let fileUrl = '#';
+    if (uploadFileObj) {
+      const fileName = `${Date.now()}-${uploadFileObj.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const { data, error } = await supabase.storage.from('files').upload(fileName, uploadFileObj);
+      if (!error && data) {
+        const { data: { publicUrl } } = supabase.storage.from('files').getPublicUrl(fileName);
+        fileUrl = publicUrl;
+      }
+    }
+    
     const { data } = await supabase.from('files').insert([{ 
       filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
-      file_url: '#', 
+      file_url: fileUrl, 
       folder_id: folderId,
       case_id: fileCaseId || null,
       pending_filing: pendingFiling,
@@ -259,7 +270,13 @@ export default function FolderDetails() {
                       >
                         <RefreshCw className={cn("w-4 h-4", file.pending_filing ? "text-amber-500" : "")} />
                       </button>
-                      <button className="text-slate-400 hover:text-emerald-400" title="Download"><Download className="w-4 h-4" /></button>
+                      <button 
+                        onClick={() => { if(file.file_url && file.file_url !== '#') window.open(file.file_url, '_blank'); else alert('No file attached.'); }} 
+                        className="text-slate-400 hover:text-emerald-400" 
+                        title="Download"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
                       <button onClick={() => handleDelete(file.id)} className="text-slate-400 hover:text-red-400" title="Delete"><Trash className="w-4 h-4" /></button>
                     </div>
                   </td>
