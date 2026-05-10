@@ -25,6 +25,7 @@ import CaseWorkspace from './pages/CaseWorkspace';
 import NotificationsPage from './pages/Notifications';
 import Settings from './pages/Settings';
 import Clients from './pages/Clients';
+import ManageClients from './pages/ManageClients';
 
 import Messages from './pages/Messages';
 
@@ -67,6 +68,7 @@ export default function App() {
             <Route path="/files/hours" element={<ProtectedRoute reqMenu="files"><FilesHours /></ProtectedRoute>} />
             
             <Route path="/clients" element={<ProtectedRoute reqMenu="clients"><Clients /></ProtectedRoute>} />
+            <Route path="/clients/manage" element={<ProtectedRoute reqMenu="clients"><ManageClients /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute reqMenu="admin"><Admin /></ProtectedRoute>} />
             <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />

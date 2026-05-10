@@ -62,7 +62,11 @@ export default function Messages() {
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${activeChannelId}` }, async (payload) => {
           const newMsg = payload.new as Message;
           // Fetch sender details
-          const { data: senderData } = await supabase!.from('staff').select('*').eq('id', newMsg.sender_id).single();
+          let { data: senderData } = await supabase!.from('staff').select('*').eq('id', newMsg.sender_id).single();
+          if (!senderData) {
+             const { data: clientData } = await supabase!.from('clients').select('*').eq('id', newMsg.sender_id).single();
+             if (clientData) senderData = { id: clientData.id, username: clientData.username, name: clientData.full_name, role: 'Client' };
+          }
           setMessages(prev => {
             if (prev.find(m => m.id === newMsg.id)) return prev;
             return [...prev, { ...newMsg, sender: senderData }];
@@ -80,9 +84,33 @@ export default function Messages() {
   }, [messages]);
 
   const fetchUsers = async () => {
-    if (!supabase) return;
-    const { data } = await supabase.from('staff').select('*').eq('firm_id', user!.firm_id).neq('id', user!.id);
-    if (data) setAllUsers(data);
+    if (!supabase || !user) return;
+    const { data: staffData } = await supabase.from('staff').select('*').eq('firm_id', user!.firm_id).neq('id', user!.id);
+    let allStaff: Staff[] = staffData || [];
+
+    let clientsData: any[] = [];
+    if (user.role === 'Managing Partner') {
+      const { data } = await supabase.from('clients').select('*').eq('firm_id', user.firm_id);
+      clientsData = data || [];
+    } else {
+      const { data: assignedCases } = await supabase.from('cases').select('client_id').eq('firm_id', user.firm_id).contains('assigned_staff_ids', [user.id]);
+      if (assignedCases && assignedCases.length > 0) {
+        const clientIds = assignedCases.map(c => c.client_id).filter(Boolean);
+        if (clientIds.length > 0) {
+           const { data } = await supabase.from('clients').select('*').in('id', clientIds);
+           clientsData = data || [];
+        }
+      }
+    }
+    
+    const formattedClients: Staff[] = clientsData.map(c => ({
+       id: c.id,
+       username: c.username,
+       name: c.full_name,
+       role: 'Client'
+    }));
+
+    setAllUsers([...allStaff, ...formattedClients]);
   };
 
   const fetchChannels = async () => {
@@ -120,16 +148,37 @@ export default function Messages() {
       const directChats = chs.filter(c => c.type === 'direct');
       if (directChats.length > 0) {
          const { data: otherMembers } = await supabase.from('channel_members')
-           .select('channel_id, user_id, last_read_at, staff(*)')
+           .select('channel_id, user_id, last_read_at')
            .in('channel_id', directChats.map(c => c.id))
            .neq('user_id', user.id);
          
          if (otherMembers) {
+            const allUserIds = otherMembers.map(m => m.user_id).filter(Boolean);
+            
+            let staffMap: any = {};
+            let clientsMap: any = {};
+            
+            if (allUserIds.length > 0) {
+              const { data: staffData } = await supabase.from('staff').select('*').in('id', allUserIds);
+              if (staffData) staffData.forEach(s => staffMap[s.id] = s);
+              
+              const missingUserIds = allUserIds.filter(id => !staffMap[id]);
+              if (missingUserIds.length > 0) {
+                const { data: clientsData } = await supabase.from('clients').select('*').in('id', missingUserIds);
+                if (clientsData) clientsData.forEach(c => clientsMap[c.id] = c);
+              }
+            }
+
             chs.forEach(c => {
                if (c.type === 'direct') {
                   const matchingMember = otherMembers.find(om => om.channel_id === c.id);
-                  if (matchingMember && matchingMember.staff) {
-                     c.other_user = Array.isArray(matchingMember.staff) ? matchingMember.staff[0] : matchingMember.staff;
+                  if (matchingMember) {
+                     if (staffMap[matchingMember.user_id]) {
+                        c.other_user = staffMap[matchingMember.user_id];
+                     } else if (clientsMap[matchingMember.user_id]) {
+                        const cl = clientsMap[matchingMember.user_id];
+                        c.other_user = { id: cl.id, username: cl.username, name: cl.full_name, role: 'Client' };
+                     }
                      c.other_read_at = matchingMember.last_read_at;
                   }
                }
@@ -144,16 +193,40 @@ export default function Messages() {
     if (!supabase) return;
     const { data } = await supabase
       .from('messages')
-      .select('*, sender:staff(*)')
+      .select('*')
       .eq('channel_id', channelId)
       .order('created_at', { ascending: true });
       
     if (data) {
-       // Ensure sender is object, not array
-       const formatted = data.map(m => ({
-          ...m,
-          sender: Array.isArray(m.sender) ? m.sender[0] : m.sender
-       }));
+       const allSenderIds = [...new Set(data.map(m => m.sender_id).filter(Boolean))];
+       
+       let staffMap: any = {};
+       let clientsMap: any = {};
+       
+       if (allSenderIds.length > 0) {
+          const { data: staffData } = await supabase.from('staff').select('*').in('id', allSenderIds);
+          if (staffData) staffData.forEach(s => staffMap[s.id] = s);
+          
+          const missingIds = allSenderIds.filter(id => !staffMap[id]);
+          if (missingIds.length > 0) {
+             const { data: clientsData } = await supabase.from('clients').select('*').in('id', missingIds);
+             if (clientsData) clientsData.forEach(c => clientsMap[c.id] = c);
+          }
+       }
+       
+       const formatted = data.map(m => {
+          let senderObj = null;
+          if (staffMap[m.sender_id]) {
+             senderObj = staffMap[m.sender_id];
+          } else if (clientsMap[m.sender_id]) {
+             const cl = clientsMap[m.sender_id];
+             senderObj = { id: cl.id, username: cl.username, name: cl.full_name, role: 'Client' };
+          }
+          return {
+             ...m,
+             sender: senderObj
+          };
+       });
        setMessages(formatted as Message[]);
     }
   };

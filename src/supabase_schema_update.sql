@@ -1,4 +1,5 @@
 -- Add case linkage to existing tables
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES clients(id) ON DELETE SET NULL;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS case_id uuid;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS case_title text;
 

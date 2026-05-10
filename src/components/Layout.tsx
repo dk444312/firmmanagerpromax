@@ -130,7 +130,13 @@ export default function Layout() {
         { name: 'Case Workspace', path: '/cases/workspace' }
       ]
     },
-    { name: 'Clients', path: '/clients', icon: Users, id: 'clients', always: false },
+    { 
+      name: 'Clients', path: '/clients', icon: Users, id: 'clients', always: false,
+      subItems: [
+        { name: 'Clients Directory', path: '/clients' },
+        { name: 'Manage Clients', path: '/clients/manage' }
+      ]
+    },
     { name: 'Tasks', path: '/tasks', icon: CheckSquare, id: 'tasks', always: false },
     { 
       name: 'Diary', path: '/diary', icon: Calendar, id: 'diary', always: false,
