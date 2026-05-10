@@ -46,8 +46,18 @@ export default function Diary() {
         supabase.from('events').select('*').eq('firm_id', user.firm_id),
         supabase.from('tasks').select('*').eq('firm_id', user.firm_id)
       ]);
-      setEvents(evRes.data || []);
-      setTasks(taskRes.data || []);
+      
+      let evs = evRes.data || [];
+      let tsks = taskRes.data || [];
+      
+      if (user.role !== 'Managing Partner' && user.case_access_mode === 'assigned') {
+        const allowedCases = user.allowed_cases || [];
+        evs = evs.filter(e => !e.case_id || allowedCases.includes(e.case_id));
+        tsks = tsks.filter(t => !t.case_id || allowedCases.includes(t.case_id));
+      }
+      
+      setEvents(evs);
+      setTasks(tsks);
     } catch (e) {
       console.error(e);
     } finally {

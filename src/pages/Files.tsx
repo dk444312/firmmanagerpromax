@@ -27,6 +27,7 @@ export default function Files() {
   const [fileCaseId, setFileCaseId] = useState('');
   const [fileCaseTitle, setFileCaseTitle] = useState('');
   const [pendingFiling, setPendingFiling] = useState(false);
+  const [requiresApproval, setRequiresApproval] = useState(false);
 
   const [expandedFolders, setExpandedFolders] = useState<string[]>([]);
 
@@ -40,7 +41,14 @@ export default function Files() {
       supabase.from('folders').select('*').eq('firm_id', user.firm_id),
       supabase.from('files').select('*').eq('firm_id', user.firm_id)
     ]);
-    setFolders(fRes.data || []);
+    
+    let allFolders = fRes.data || [];
+    if (user.role !== 'Managing Partner' && user.case_access_mode === 'assigned') {
+      const allowedFolders = user.allowed_folders || [];
+      allFolders = allFolders.filter(f => allowedFolders.includes(f.id));
+    }
+    
+    setFolders(allFolders);
     setFiles(fileRes.data || []);
     setLoading(false);
   };
@@ -83,7 +91,10 @@ export default function Files() {
       folder_id: selectedFolder,
       case_id: fileCaseId || null,
       pending_filing: pendingFiling,
-      firm_id: user.firm_id
+      requires_approval: requiresApproval,
+      approval_status: requiresApproval ? 'pending' : 'approved',
+      firm_id: user.firm_id,
+      uploaded_by: user.id
     }]).select().single();
     
     if (data) {
@@ -92,6 +103,7 @@ export default function Files() {
       setFileCaseId('');
       setFileCaseTitle('');
       setPendingFiling(false);
+      setRequiresApproval(false);
       setNewFileName('');
       setUploadFileObj(null);
     }
@@ -198,6 +210,11 @@ export default function Files() {
                 <label className="flex items-center gap-2 text-sm text-slate-300 mb-6">
                   <input type="checkbox" checked={pendingFiling} onChange={e => setPendingFiling(e.target.checked)} className="form-checkbox bg-[#0a0a0a] border-white/20 text-emerald-500 rounded focus:ring-0" />
                   Mark as Pending Filing
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-slate-300 mb-6">
+                  <input type="checkbox" checked={requiresApproval} onChange={e => setRequiresApproval(e.target.checked)} className="form-checkbox bg-[#0a0a0a] border-white/20 text-emerald-500 rounded focus:ring-0" />
+                  Requires Approval/Checking
                 </label>
 
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Document Name (Optional)</label>

@@ -6,7 +6,7 @@ import { cn } from '../lib/utils';
 import CaseSelectorModal from '../components/CaseSelectorModal';
 import { supabase } from '../lib/supabase';
 
-type FirmFile = { id: string; filename: string; file_url: string; folder_id: string; created_at: string; case_id?: string; case_title?: string; pending_filing?: boolean; status?: string };
+type FirmFile = { id: string; filename: string; file_url: string; folder_id: string; created_at: string; case_id?: string; case_title?: string; pending_filing?: boolean; status?: string; requires_approval?: boolean; approval_status?: string; uploaded_by?: string; };
 
 export default function FolderDetails() {
   const { folderId } = useParams();
@@ -23,6 +23,7 @@ export default function FolderDetails() {
   const [fileCaseId, setFileCaseId] = useState('');
   const [fileCaseTitle, setFileCaseTitle] = useState('');
   const [pendingFiling, setPendingFiling] = useState(false);
+  const [requiresApproval, setRequiresApproval] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [uploadFileObj, setUploadFileObj] = useState<File | null>(null);
 
@@ -111,7 +112,10 @@ export default function FolderDetails() {
       folder_id: folderId,
       case_id: fileCaseId || null,
       pending_filing: pendingFiling,
-      firm_id: user.firm_id
+      requires_approval: requiresApproval,
+      approval_status: requiresApproval ? 'pending' : 'approved',
+      firm_id: user.firm_id,
+      uploaded_by: user.id
     }]).select().single();
     
     if (data) {
@@ -120,9 +124,37 @@ export default function FolderDetails() {
       setFileCaseId('');
       setFileCaseTitle('');
       setPendingFiling(false);
+      setRequiresApproval(false);
       setNewFileName('');
       setUploadFileObj(null);
     }
+  };
+
+  const handleApprove = async (fileId: string) => {
+    if (!token || !supabase) return;
+    await supabase.from('files').update({ approval_status: 'approved' }).eq('id', fileId);
+    setFiles(files.map(f => f.id === fileId ? { ...f, approval_status: 'approved' } : f));
+  };
+
+  const handleReplaceAndApprove = (file: FirmFile) => {
+    // We can open standard upload mode but tied to a file to replace it visually
+    // For simplicity, let's open an alert telling them to delete and re-upload, 
+    // or we can implement real replacement.
+     const input = document.createElement('input');
+     input.type = 'file';
+     input.onchange = async (e: any) => {
+        const fileObj = e.target.files[0];
+        if (!fileObj) return;
+        
+        const fileName = `${Date.now()}-${fileObj.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+        const { data, error } = await supabase.storage.from('files').upload(fileName, fileObj);
+        if (!error && data) {
+          const { data: { publicUrl } } = supabase.storage.from('files').getPublicUrl(fileName);
+          await supabase.from('files').update({ file_url: publicUrl, filename: fileObj.name, approval_status: 'approved' }).eq('id', file.id);
+          fetchFolderContent();
+        }
+     };
+     input.click();
   };
 
   const filtered = files.filter(f => (f.filename || '').toLowerCase().includes(search.toLowerCase()));
@@ -193,6 +225,11 @@ export default function FolderDetails() {
                   Mark as Pending Filing
                 </label>
 
+                <label className="flex items-center gap-2 text-sm text-slate-300 mb-6">
+                  <input type="checkbox" checked={requiresApproval} onChange={e => setRequiresApproval(e.target.checked)} className="form-checkbox bg-[#0a0a0a] border-white/20 text-emerald-500 rounded focus:ring-0" />
+                  Requires Approval/Checking
+                </label>
+
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Document Name (Optional)</label>
                 <input type="text" placeholder="Custom document name" value={newFileName} onChange={e => setNewFileName(e.target.value)} className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white mb-4" />
               </div>
@@ -232,6 +269,7 @@ export default function FolderDetails() {
               <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/5">
                 <th className="pb-4 pl-4 font-semibold">Document Name</th>
                 <th className="pb-4 font-semibold">Filing Status</th>
+                <th className="pb-4 font-semibold">Approval</th>
                 <th className="pb-4 font-semibold">Uploaded Date</th>
                 <th className="pb-4 font-semibold">Linked Matter</th>
                 <th className="pb-4 pr-4 font-semibold text-right">Actions</th>
@@ -239,7 +277,7 @@ export default function FolderDetails() {
             </thead>
             <tbody className="divide-y divide-white/5">
               {filtered.map(file => (
-                <tr key={file.id} className="hover:bg-white/[0.02] transition-colors group">
+                <tr key={file.id} className={`hover:bg-white/[0.02] transition-colors group ${file.requires_approval && file.approval_status === 'pending' ? 'bg-rose-500/5' : ''}`}>
                   <td className="py-4 pl-4 flex items-center gap-3">
                     <FileText className="w-5 h-5 text-emerald-500" />
                     <button 
@@ -256,6 +294,15 @@ export default function FolderDetails() {
                       {file.pending_filing ? 'Pending Filing' : 'Filed'}
                     </span>
                   </td>
+                  <td className="py-4 text-xs font-medium">
+                    {!file.requires_approval ? (
+                       <span className="text-slate-500">-</span>
+                    ) : file.approval_status === 'pending' ? (
+                       <span className="px-3 py-1 rounded-full bg-rose-500/10 text-rose-400 font-semibold border border-rose-500/20 shadow-sm animate-pulse">Pending Review</span>
+                    ) : (
+                       <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">Approved</span>
+                    )}
+                  </td>
                   <td className="py-4 text-sm text-slate-400">
                     {new Date(file.created_at).toLocaleDateString()}
                   </td>
@@ -267,22 +314,30 @@ export default function FolderDetails() {
                     )}
                   </td>
                   <td className="py-4 pr-4 text-right">
-                    <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={() => handleToggleFiling(file)}
-                        className={`text-slate-400 hover:text-emerald-400`} 
-                        title={file.pending_filing ? "Mark as Filed" : "Mark as Pending Filing"}
-                      >
-                        <RefreshCw className={cn("w-4 h-4", file.pending_filing ? "text-amber-500" : "")} />
-                      </button>
-                      <button 
-                        onClick={() => { if(file.file_url && file.file_url !== '#') window.open(file.file_url, '_blank'); else alert('No file attached.'); }} 
-                        className="text-slate-400 hover:text-emerald-400" 
-                        title="Download"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(file.id)} className="text-slate-400 hover:text-red-400" title="Delete"><Trash className="w-4 h-4" /></button>
+                    <div className="flex flex-col items-end gap-2">
+                       <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <button 
+                           onClick={() => handleToggleFiling(file)}
+                           className={`text-slate-400 hover:text-emerald-400`} 
+                           title={file.pending_filing ? "Mark as Filed" : "Mark as Pending Filing"}
+                         >
+                           <RefreshCw className={cn("w-4 h-4", file.pending_filing ? "text-amber-500" : "")} />
+                         </button>
+                         <button 
+                           onClick={() => { if(file.file_url && file.file_url !== '#') window.open(file.file_url, '_blank'); else alert('No file attached.'); }} 
+                           className="text-slate-400 hover:text-emerald-400" 
+                           title="Download"
+                         >
+                           <Download className="w-4 h-4" />
+                         </button>
+                         <button onClick={() => handleDelete(file.id)} className="text-slate-400 hover:text-red-400" title="Delete"><Trash className="w-4 h-4" /></button>
+                       </div>
+                       {(user.role === 'Admin' || user.role === 'Managing Partner') && file.requires_approval && file.approval_status === 'pending' && (
+                          <div className="flex items-center gap-2 mt-1">
+                             <button onClick={() => handleApprove(file.id)} className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded font-medium shadow-lg">Approve</button>
+                             <button onClick={() => handleReplaceAndApprove(file)} className="text-[10px] bg-[#262626] border border-white/10 hover:border-emerald-500/50 text-white px-2 py-1 rounded font-medium shadow-lg hover:text-emerald-400">Replace & Approve</button>
+                          </div>
+                       )}
                     </div>
                   </td>
                 </tr>

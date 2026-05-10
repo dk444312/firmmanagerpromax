@@ -10,6 +10,7 @@ export default function Dashboard() {
   const [cases, setCases] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -20,15 +21,17 @@ export default function Dashboard() {
     if (!token || !supabase || !user) return;
     
     // Fetch dashboard data
-    const [{ data: casesData }, { data: eventsData }, { data: tasksData }] = await Promise.all([
+    const [casesRes, eventsRes, tasksRes, pendingRes] = await Promise.all([
       supabase.from('cases').select('*').eq('firm_id', user.firm_id),
       supabase.from('events').select('*').eq('firm_id', user.firm_id),
-      supabase.from('tasks').select('*').eq('firm_id', user.firm_id)
+      supabase.from('tasks').select('*').eq('firm_id', user.firm_id),
+      (user.role === 'Admin' || user.role === 'Managing Partner') ? supabase.from('files').select('*').eq('firm_id', user.firm_id).eq('requires_approval', true).eq('approval_status', 'pending') : Promise.resolve({ data: [] })
     ]);
 
-    setCases(Array.isArray(casesData) ? casesData.slice(-4).reverse() : []);
-    setEvents(Array.isArray(eventsData) ? eventsData.filter((e: any) => e.date >= new Date().toISOString().split('T')[0]).sort((a: any, b: any) => a.date.localeCompare(b.date)).slice(0, 4) : []);
-    setTasks(Array.isArray(tasksData) ? tasksData.filter((t: any) => t.status !== 'Completed').slice(-4).reverse() : []);
+    setCases(Array.isArray(casesRes.data) ? casesRes.data.slice(-4).reverse() : []);
+    setEvents(Array.isArray(eventsRes.data) ? eventsRes.data.filter((e: any) => e.date >= new Date().toISOString().split('T')[0]).sort((a: any, b: any) => a.date.localeCompare(b.date)).slice(0, 4) : []);
+    setTasks(Array.isArray(tasksRes.data) ? tasksRes.data.filter((t: any) => t.status !== 'Completed').slice(-4).reverse() : []);
+    setPendingApprovals(Array.isArray(pendingRes.data) ? pendingRes.data : []);
   };
 
   useEffect(() => {
@@ -110,12 +113,41 @@ export default function Dashboard() {
           <h3 className="text-sm font-medium text-white">Add Event</h3>
           <p className="text-xs text-slate-500 mt-1">Schedule hearing</p>
         </Link>
-        <div className="bg-[#151619] p-6 rounded-2xl border border-white/5 shadow-lg flex flex-col justify-center">
+        <div className="bg-[#151619] p-6 rounded-2xl border border-white/5 shadow-lg flex flex-col justify-center relative group">
           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Role Status</h3>
           <div className="text-xl font-light text-white">{user.role}</div>
           <div className="text-xs mt-1 text-slate-400 capitalize">{user.case_access_mode} Case Access</div>
+          
+          {(user.role === 'Admin' || user.role === 'Managing Partner') && pendingApprovals.length > 0 && (
+             <div className="absolute -top-3 -right-3 w-10 h-10 bg-rose-500 rounded-full flex items-center justify-center text-white font-bold shadow-lg shadow-rose-500/20 border-[3px] border-[#151619] animate-bounce">
+                {pendingApprovals.length}
+             </div>
+          )}
         </div>
       </div>
+
+      {(user.role === 'Admin' || user.role === 'Managing Partner') && pendingApprovals.length > 0 && (
+        <div className="mb-10 bg-rose-500/10 border border-rose-500/30 rounded-2xl p-6 relative overflow-hidden">
+           <div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div>
+           <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-rose-400 flex items-center gap-2">
+                 <CheckSquare className="w-5 h-5" />
+                 Documents Pending Approval ({pendingApprovals.length})
+              </h3>
+           </div>
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {pendingApprovals.map(file => (
+                 <Link key={file.id} to={`/files/${file.folder_id}`} className="bg-[#151619] border border-white/10 hover:border-rose-500/50 p-4 rounded-xl flex items-center justify-between transition-colors group">
+                    <div className="flex flex-col overflow-hidden">
+                       <span className="text-sm font-medium text-white truncate">{file.filename}</span>
+                       <span className="text-xs text-slate-500 truncate mt-1">Found in Vault</span>
+                    </div>
+                    <div className="text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity ml-4 text-xs font-medium">Review &rarr;</div>
+                 </Link>
+              ))}
+           </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Recent Cases */}

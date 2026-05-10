@@ -18,6 +18,8 @@ export default function CaseDetails() {
   const [isEditingMeta, setIsEditingMeta] = useState(false);
   const [editData, setEditData] = useState<any>(null);
 
+  const [caseNotes, setCaseNotes] = useState<any[]>([]);
+
   const fetchCase = async () => {
     if (!token || !supabase) return;
     try {
@@ -26,8 +28,41 @@ export default function CaseDetails() {
         setData(resData);
         setNewStage(resData.stage || 'Pre-trial');
       }
+      const { data: notesData, error: notesError } = await supabase.from('case_notes').select('*').eq('case_id', id).order('created_at', { ascending: false });
+      if (notesError) console.error("Error fetching notes:", notesError);
+      if (notesData && notesData.length > 0) {
+        const authorIds = [...new Set(notesData.map(n => n.author_id).filter(Boolean))];
+        if (authorIds.length > 0) {
+           const { data: staffData } = await supabase.from('staff').select('id, name, username').in('id', authorIds);
+           if (staffData) {
+             const staffMap = staffData.reduce((acc: any, s: any) => ({ ...acc, [s.id]: s }), {});
+             notesData.forEach(n => { n.staff = staffMap[n.author_id]; });
+           }
+        }
+        setCaseNotes(notesData);
+      } else {
+        setCaseNotes([]);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveNote = async () => {
+    if (!note.trim() || !token || !supabase || !user) return;
+    const { data: newNote, error } = await supabase.from('case_notes').insert([{
+      case_id: id,
+      author_id: user.id,
+      content: note
+    }]).select('*').single();
+    
+    if (error) {
+       console.error("Save note error:", error);
+       alert("Failed to save note: " + error.message);
+    } else if (newNote) {
+      newNote.staff = { name: user.name, username: user.username };
+      setCaseNotes([newNote, ...caseNotes]);
+      setNote('');
     }
   };
 
@@ -211,12 +246,26 @@ export default function CaseDetails() {
                className="flex-1 bg-[#0a0a0a] border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-emerald-500/50 resize-none"
              ></textarea>
              <div className="mt-4 flex justify-end">
-               <button className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded font-medium text-sm transition-colors shadow">Save Note</button>
+               <button onClick={handleSaveNote} disabled={!note.trim()} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded font-medium text-sm transition-colors shadow disabled:opacity-50">Save Note</button>
              </div>
            </div>
-           <div className="w-80 bg-[#121212] rounded-2xl border border-white/5 shadow-lg p-6">
+           <div className="w-80 bg-[#121212] rounded-2xl border border-white/5 shadow-lg p-6 max-h-[80vh] overflow-y-auto">
              <h3 className="text-sm font-medium text-slate-300 uppercase tracking-widest mb-4">Saved Notes</h3>
-             <div className="text-slate-500 text-sm italic">You haven't saved any notes yet for this matter.</div>
+             {caseNotes.length === 0 ? (
+                <div className="text-slate-500 text-sm italic">You haven't saved any notes yet for this matter.</div>
+             ) : (
+                <div className="space-y-4">
+                  {caseNotes.map(n => (
+                    <div key={n.id} className="bg-[#1a1c20] p-4 rounded-xl border border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-slate-300">{n.staff?.name || n.staff?.username || 'Unknown'}</span>
+                        <span className="text-[10px] text-slate-500">{new Date(n.created_at).toLocaleDateString()}</span>
+                      </div>
+                      <p className="text-sm text-slate-400 whitespace-pre-wrap">{n.content}</p>
+                    </div>
+                  ))}
+                </div>
+             )}
            </div>
         </div>
       )}

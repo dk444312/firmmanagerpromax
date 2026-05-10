@@ -51,7 +51,14 @@ export default function Cases() {
       .select('*')
       .eq('firm_id', user.firm_id)
       .then(({ data }) => {
-        setCases(Array.isArray(data) ? data : []);
+        let allCases = Array.isArray(data) ? data : [];
+        if (user.role !== 'Managing Partner' && user.case_access_mode === 'assigned') {
+           const allowedIds = user.allowed_cases || [];
+           allCases = allCases.filter(c => 
+             allowedIds.includes(c.id) || (c.assigned_staff_ids && c.assigned_staff_ids.includes(user.id))
+           );
+        }
+        setCases(allCases);
         setLoading(false);
       });
   }, [token, user]);

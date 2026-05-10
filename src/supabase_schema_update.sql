@@ -5,6 +5,14 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS case_title text;
 ALTER TABLE events ADD COLUMN IF NOT EXISTS case_id uuid;
 ALTER TABLE events ADD COLUMN IF NOT EXISTS case_title text;
 
+CREATE TABLE IF NOT EXISTS case_notes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    author_id UUID REFERENCES staff(id) ON DELETE SET NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 ALTER TABLE files ADD COLUMN IF NOT EXISTS case_id uuid;
 -- Create storage buckets if they don't exist
 INSERT INTO storage.buckets (id, name, public) VALUES ('profiles', 'profiles', true) ON CONFLICT (id) DO NOTHING;
@@ -17,7 +25,12 @@ CREATE POLICY "Public profiles upload" ON storage.objects FOR INSERT WITH CHECK 
 ALTER TABLE files ADD COLUMN IF NOT EXISTS case_title text;
 ALTER TABLE files ADD COLUMN IF NOT EXISTS pending_filing boolean DEFAULT false;
 
-ALTER TABLE staff ADD COLUMN IF NOT EXISTS picture text;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS requires_approval boolean DEFAULT false;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS approval_status text DEFAULT 'pending'; -- pending, approved, rejected
+ALTER TABLE files ADD COLUMN IF NOT EXISTS uploaded_by uuid REFERENCES staff(id) ON DELETE SET NULL;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS filing_fee numeric DEFAULT 0;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS filed boolean DEFAULT false;
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS message_notifications boolean DEFAULT true;
 ALTER TABLE firms ADD COLUMN IF NOT EXISTS ui_config jsonb DEFAULT '{}'::jsonb;
 
 -- Create clients table

@@ -13,7 +13,16 @@ export default function CaseWorkspace() {
   useEffect(() => {
     if (!token || !supabase || !user) return;
     supabase.from('cases').select('*').eq('firm_id', user.firm_id)
-      .then(res => setCases(res.data || []));
+      .then(res => {
+        let allCases = res.data || [];
+        if (user.role !== 'Managing Partner' && user.case_access_mode === 'assigned') {
+           const allowedIds = user.allowed_cases || [];
+           allCases = allCases.filter(c => 
+             allowedIds.includes(c.id) || (c.assigned_staff_ids && c.assigned_staff_ids.includes(user.id))
+           );
+        }
+        setCases(allCases);
+      });
   }, [token, user]);
 
   const filtered = cases.filter(c => c.title?.toLowerCase().includes(search.toLowerCase()) || c.case_number?.toLowerCase().includes(search.toLowerCase()));

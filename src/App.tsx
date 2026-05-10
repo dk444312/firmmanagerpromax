@@ -22,8 +22,11 @@ import DiaryUpcoming from './pages/DiaryUpcoming';
 import DiaryPast from './pages/DiaryPast';
 import FilesHours from './pages/FilesHours';
 import CaseWorkspace from './pages/CaseWorkspace';
+import NotificationsPage from './pages/Notifications';
 import Settings from './pages/Settings';
 import Clients from './pages/Clients';
+
+import Messages from './pages/Messages';
 
 function ProtectedRoute({ children, reqMenu }: { children: React.ReactNode, reqMenu?: string }) {
   const { user, loading } = useAuth();
@@ -65,6 +68,8 @@ export default function App() {
             
             <Route path="/clients" element={<ProtectedRoute reqMenu="clients"><Clients /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute reqMenu="admin"><Admin /></ProtectedRoute>} />
+            <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>

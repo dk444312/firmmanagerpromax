@@ -84,6 +84,8 @@ function SelectionModal({ title, items, selected, onSave, onClose }: {
   );
 }
 
+import StaffAccessCard from '../components/StaffAccessCard';
+
 export default function Admin() {
   const { token, user } = useAuth();
   const [staff, setStaff] = useState<StaffDTO[]>([]);
@@ -96,6 +98,8 @@ export default function Admin() {
     staffId: string, 
     selected: string[] 
   } | null>(null);
+  
+  const [activeStaffProfile, setActiveStaffProfile] = useState<StaffDTO | null>(null);
 
   const fetchData = async () => {
     if (!token || !supabase || !user) return;
@@ -284,6 +288,10 @@ export default function Admin() {
                                 </button>
                               </div>
                             )}
+                            
+                            <button onClick={() => setActiveStaffProfile(member)} className="text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white px-3 py-1.5 rounded-md font-medium tracking-wide w-max mt-1 transition-colors border border-white/5">
+                               Access Parameters Card
+                            </button>
                           </div>
                         )}
                       </td>
@@ -305,8 +313,19 @@ export default function Admin() {
             const field = activeSelection.type === 'Cases' ? 'allowed_cases' : 'allowed_folders';
             updatePermissions(activeSelection.staffId, { [field]: newIds });
             setActiveSelection(null);
+            if (activeStaffProfile && activeStaffProfile.id === activeSelection.staffId) {
+               setActiveStaffProfile({ ...activeStaffProfile, [field]: newIds });
+            }
           }}
           onClose={() => setActiveSelection(null)}
+        />
+      )}
+      
+      {activeStaffProfile && (
+        <StaffAccessCard 
+           member={activeStaffProfile} 
+           onClose={() => setActiveStaffProfile(null)}
+           onUpdate={(type: 'Cases' | 'Folders') => setActiveSelection({ type, staffId: activeStaffProfile.id, selected: type === 'Cases' ? activeStaffProfile.allowed_cases || [] : activeStaffProfile.allowed_folders || [] })}
         />
       )}
     </div>

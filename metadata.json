@@ -1,6 +1,6 @@
 {
   "name": "FirmManager",
   "description": "FirmManager: A professional legal practice management platform with role-based navigation, case tracking, diary, and document vault, optimized for efficient law firm operations.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": []
 }

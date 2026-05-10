@@ -8,6 +8,7 @@ export default function Settings() {
   const { user, token, uiConfig, updateUiConfig } = useAuth();
   const [name, setName] = useState(user?.name || '');
   const [picture, setPicture] = useState(user?.picture || '');
+  const [messageNotifications, setMessageNotifications] = useState(user?.message_notifications ?? true);
   const [message, setMessage] = useState('');
   const [uploading, setUploading] = useState(false);
   
@@ -57,7 +58,7 @@ export default function Settings() {
     e.preventDefault();
     if (!token || !supabase || !user) return;
     try {
-      const { error } = await supabase.from('staff').update({ name, picture }).eq('id', user.id);
+      const { error } = await supabase.from('staff').update({ name, picture, message_notifications: messageNotifications }).eq('id', user.id);
       if (!error) {
         setMessage('Profile updated successfully.');
         setTimeout(() => setMessage(''), 3000);
@@ -153,6 +154,22 @@ export default function Settings() {
                 </div>
               </div>
             </div>
+            
+            <div>
+               <label className="flex items-center gap-3 cursor-pointer">
+                 <input 
+                   type="checkbox"
+                   checked={messageNotifications}
+                   onChange={e => setMessageNotifications(e.target.checked)}
+                   className="w-4 h-4 rounded border-white/10 bg-[#0a0a0a] text-emerald-500 focus:ring-emerald-500/20"
+                 />
+                 <div className="flex flex-col">
+                    <span className="text-sm font-medium text-slate-200">Message Notifications</span>
+                    <span className="text-xs text-slate-500">Enable or disable new message notifications</span>
+                 </div>
+               </label>
+            </div>
+
             <div className="pt-4 border-t border-white/10 flex items-center justify-between">
               {message ? <span className="text-sm text-emerald-400">{message}</span> : <span />}
               <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-medium shadow-lg transition-colors text-sm">

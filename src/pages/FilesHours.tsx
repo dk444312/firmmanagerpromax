@@ -43,7 +43,7 @@ export default function Filing() {
     id: '',
     date: new Date().toISOString().split('T')[0], 
     document: '', 
-    hours: 0.5, 
+    hours: 1, 
     rate_mwk: 50000, 
     case_id: '',
     case_title: '',
@@ -75,6 +75,7 @@ export default function Filing() {
   const [filterPeriod, setFilterPeriod] = useState<'All' | 'Today' | 'This Week' | 'Last Month'>('All');
   const [specificDate, setSpecificDate] = useState('');
   const [caseFiles, setCaseFiles] = useState<FirmFile[]>([]);
+  const [serviceCharges, setServiceCharges] = useState<Record<string, string>>({});
 
   const fetchData = async () => {
     if (!token || !supabase || !user) return;
@@ -88,7 +89,7 @@ export default function Filing() {
       
       if (Array.isArray(fileData)) {
         setPendingFiles(fileData.filter(f => f.pending_filing === true));
-        setFiledFiles(fileData.filter(f => f.pending_filing === false));
+        setFiledFiles(fileData.filter(f => f.pending_filing === false && logData.some(l => l.file_id === f.id)));
       }
       if (Array.isArray(logData)) {
         setLogs(logData);
@@ -117,28 +118,32 @@ export default function Filing() {
   }, [token, user]);
 
   const handleToggleFiling = async (file: FirmFile) => {
-    if (!token || !supabase) return;
-    const newStatus = !file.pending_filing;
+    if (!token || !supabase || !user) return;
     
-    await supabase.from('files').update({ pending_filing: newStatus }).eq('id', file.id);
+    // Auto log the filing
+    const charge = parseFloat(serviceCharges[file.id]) || 0;
+    
+    await supabase.from('files').update({ pending_filing: false }).eq('id', file.id);
 
-    if (!newStatus) {
-      // If marked as finished (not pending anymore), prompt to log hours
-      if (confirm(`Do you want to log filing hours for "${file.filename}" now?`)) {
-        setNewLog({
-          id: '',
-          date: new Date().toISOString().split('T')[0],
-          document: file.filename,
-          hours: 1,
-          rate_mwk: 50000,
-          case_id: file.case_id || '',
-          case_title: file.case_title || '',
-          file_id: file.id
-        });
-        if (file.case_id) fetchFilesForCase(file.case_id);
-        setIsAdding(true);
-      }
-    }
+    const payload = {
+      date: new Date().toISOString().split('T')[0],
+      staff_name: user.full_name || user.role || 'Staff',
+      document: file.filename,
+      hours: 1,
+      rate_mwk: charge,
+      case_id: file.case_id || null,
+      case_title: file.case_title || null,
+      file_id: file.id,
+      firm_id: user.firm_id
+    };
+    await supabase.from('filing_logs').insert([payload]);
+    
+    setServiceCharges(prev => {
+      const next = { ...prev };
+      delete next[file.id];
+      return next;
+    });
+
     fetchData();
   };
 
@@ -146,7 +151,7 @@ export default function Filing() {
     e.preventDefault();
     if (!token || !supabase || !user) return;
 
-    const payload = { ...newLog } as any;
+    const payload = { ...newLog, hours: 1 } as any;
     if (!payload.case_id) {
        payload.case_id = null;
        payload.case_title = null;
@@ -161,6 +166,11 @@ export default function Filing() {
       delete payload.id;
       const { error } = await supabase.from('filing_logs').insert([{ ...payload, firm_id: user.firm_id }]);
       success = !error;
+      
+      if (success && payload.file_id && payload.file_id !== 'custom') {
+        // Also move it to Filed Documents
+        await supabase.from('files').update({ pending_filing: false }).eq('id', payload.file_id);
+      }
     }
 
     if (success) {
@@ -241,7 +251,7 @@ export default function Filing() {
       return;
     }
     
-    const headers = ["Date", "Matter", "Document", "Staff Member", "Hours Logged", "Total (MWK)"];
+    const headers = ["Date", "Matter", "Document", "Staff Member", "Fee (MWK)"];
     const csvContent = [
       headers.join(","),
       ...filteredLogs.map(log => [
@@ -249,8 +259,7 @@ export default function Filing() {
         `"${log.case_title || 'N/A'}"`,
         `"${log.document}"`,
         `"${log.staff_name}"`,
-        log.hours.toFixed(1),
-        log.hours * log.rate_mwk
+        log.rate_mwk
       ].join(","))
     ].join("\n");
     
@@ -272,7 +281,7 @@ export default function Filing() {
             <Clock className="w-8 h-8 text-blue-500" />
             Filing Workspace
           </h1>
-          <p className="text-slate-400 mt-2">Manage filing status and billable hours.</p>
+          <p className="text-slate-400 mt-2">Manage filing status and service fees.</p>
         </div>
         <div className="flex flex-wrap gap-3">
           <div className="relative">
@@ -310,8 +319,8 @@ export default function Filing() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {pendingFiles.map(file => (
-              <div key={file.id} className="bg-[#151619] border border-white/10 rounded-xl p-5 hover:border-emerald-500/30 transition-all group relative overflow-hidden">
-                <div className="flex items-start justify-between mb-4 relative z-10">
+              <div key={file.id} className="bg-[#151619] border border-white/10 rounded-xl p-5 hover:border-emerald-500/30 transition-all group relative overflow-hidden flex flex-col justify-between">
+                <div className="flex items-start justify-between mb-6 relative z-10">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded bg-emerald-500/10 flex items-center justify-center">
                       <FileText className="w-5 h-5 text-emerald-500" />
@@ -326,20 +335,34 @@ export default function Filing() {
                       <p className="text-[10px] text-slate-500">Added {new Date(file.created_at).toLocaleDateString()}</p>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => handleToggleFiling(file)}
-                    className="text-xs bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors font-medium"
-                  >
-                    <CheckCircle className="w-3.5 h-3.5" /> Mark Filed
-                  </button>
                 </div>
+                
+                <div className="relative z-10 pt-4 border-t border-white/5 mt-auto">
+                  <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-2">Service Charge Fee (MWK)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={serviceCharges[file.id] || ''}
+                      onChange={e => setServiceCharges({...serviceCharges, [file.id]: e.target.value})}
+                      className="flex-1 bg-[#0a0a0a] border border-white/10 rounded py-1.5 px-3 text-sm text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                    />
+                    <button 
+                      onClick={() => handleToggleFiling(file)}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center shadow-lg"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
                 {file.case_title && (
-                  <div className="text-[10px] text-slate-400 bg-white/5 inline-block px-2 py-0.5 rounded border border-white/5 relative z-10">
+                  <div className="text-[10px] text-slate-400 bg-white/5 inline-block px-2 py-0.5 rounded border border-white/5 absolute top-2 right-2 z-10">
                     Matter: {file.case_title}
                   </div>
                 )}
                 {/* Background Decoration */}
-                <div className="absolute top-0 right-0 p-2 opacity-5 pointer-events-none">
+                <div className="absolute top-10 right-0 p-2 opacity-5 pointer-events-none">
                   <FileText className="w-20 h-20" />
                 </div>
               </div>
@@ -383,30 +406,10 @@ export default function Filing() {
                       </div>
                     </div>
                     {alreadyLogged ? (
-                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1 mt-3">
                         <CheckCircle className="w-3 h-3" /> Logged
                       </span>
-                    ) : (
-                      <button 
-                        onClick={() => {
-                          setNewLog({
-                            id: '',
-                            date: new Date().toISOString().split('T')[0],
-                            document: file.filename,
-                            hours: 1,
-                            rate_mwk: 50000,
-                            case_id: file.case_id || '',
-                            case_title: file.case_title || '',
-                            file_id: file.id
-                          });
-                          if (file.case_id) fetchFilesForCase(file.case_id);
-                          setIsAdding(true);
-                        }}
-                        className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors font-medium"
-                      >
-                        <Clock className="w-3.5 h-3.5" /> Log Filling
-                      </button>
-                    )}
+                    ) : null}
                   </div>
                   {file.case_title && (
                     <div className="text-[10px] text-slate-400 bg-white/5 inline-block px-2 py-0.5 rounded border border-white/5 relative z-10">
@@ -427,7 +430,7 @@ export default function Filing() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
           <h2 className="text-xl font-medium text-white flex items-center gap-2">
             <Clock className="w-5 h-5 text-blue-500" />
-            Hours Logged
+            Filing Fees Log
           </h2>
           
           <div className="flex items-center gap-2 bg-[#151619] p-1 rounded-lg border border-white/10">
@@ -459,7 +462,7 @@ export default function Filing() {
             <button onClick={() => setIsAdding(false)} className="absolute top-4 right-4 text-slate-500 hover:text-white">
               <X className="w-5 h-5" />
             </button>
-            <h2 className="text-2xl font-light text-white mb-6">{isEditing ? 'Edit Log Entry' : 'Log Filing Hours'}</h2>
+            <h2 className="text-2xl font-light text-white mb-6">{isEditing ? 'Edit Log Entry' : 'Log Filing Fee'}</h2>
             <form onSubmit={handleSaveLog} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Matter / Case</label>
@@ -477,14 +480,10 @@ export default function Filing() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Date</label>
                   <input required type="date" value={newLog.date} onChange={e => setNewLog({...newLog, date: e.target.value})} className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg py-2.5 px-4 text-white text-sm focus:border-blue-500/50 outline-none transition-colors" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Time Logged (Hours)</label>
-                  <input required type="number" step="0.1" value={newLog.hours} onChange={e => setNewLog({...newLog, hours: parseFloat(e.target.value)})} className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg py-2.5 px-4 text-white text-sm focus:border-blue-500/50 outline-none transition-colors" />
                 </div>
               </div>
               
@@ -512,13 +511,13 @@ export default function Filing() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Rate (MWK/hr)</label>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Service Charge Fee (MWK)</label>
                 <input required type="number" value={newLog.rate_mwk} onChange={e => setNewLog({...newLog, rate_mwk: parseInt(e.target.value)})} className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg py-2.5 px-4 text-white text-sm focus:border-blue-500/50 outline-none transition-colors" />
               </div>
 
               <div className="bg-[#0a0a0a] p-4 rounded-xl border border-white/5 flex justify-between items-center">
                 <span className="text-xs text-slate-400 uppercase font-bold tracking-widest">Total Billable</span>
-                <span className="text-xl font-light text-emerald-500">MWK {(newLog.hours * newLog.rate_mwk).toLocaleString()}</span>
+                <span className="text-xl font-light text-emerald-500">MWK {newLog.rate_mwk.toLocaleString()}</span>
               </div>
 
               <div className="flex justify-end gap-3 mt-8">
@@ -551,7 +550,6 @@ export default function Filing() {
                 <th className="px-8 py-5">Date</th>
                 <th className="px-8 py-5">Matter & Document</th>
                 <th className="px-8 py-5">Staff Member</th>
-                <th className="px-8 py-5 text-right">Hours</th>
                 <th className="px-8 py-5 text-right">Fee (MWK)</th>
                 <th className="px-8 py-5 text-right">Actions</th>
               </tr>
@@ -576,8 +574,7 @@ export default function Filing() {
                       <span className="text-sm text-slate-300">{log.staff_name}</span>
                     </div>
                   </td>
-                  <td className="px-8 py-6 text-sm font-bold text-blue-400 text-right">{log.hours.toFixed(1)}h</td>
-                  <td className="px-8 py-6 text-sm font-bold text-emerald-400 text-right">{(log.hours * log.rate_mwk).toLocaleString()}</td>
+                  <td className="px-8 py-6 text-sm font-bold text-emerald-400 text-right">{log.rate_mwk.toLocaleString()}</td>
                   <td className="px-8 py-6 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => handleEdit(log)} className="p-2 text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-all">
@@ -592,7 +589,7 @@ export default function Filing() {
               ))}
               {filteredLogs.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-8 py-20 text-center">
+                  <td colSpan={5} className="px-8 py-20 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <Clock className="w-10 h-10 text-slate-700" />
                       <p className="text-slate-500 text-sm">No log entries match your filters.</p>
@@ -618,12 +615,8 @@ export default function Filing() {
             </div>
             <div className="flex gap-10">
               <div className="flex flex-col items-end">
-                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Total Hours</span>
-                <span className="text-lg font-light text-blue-400">{filteredLogs.reduce((sum, l) => sum + l.hours, 0).toFixed(1)}h</span>
-              </div>
-              <div className="flex flex-col items-end">
                 <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Total Value</span>
-                <span className="text-lg font-bold text-emerald-500">MWK {filteredLogs.reduce((sum, l) => sum + (l.hours * l.rate_mwk), 0).toLocaleString()}</span>
+                <span className="text-lg font-bold text-emerald-500">MWK {filteredLogs.reduce((sum, l) => sum + l.rate_mwk, 0).toLocaleString()}</span>
               </div>
             </div>
           </div>

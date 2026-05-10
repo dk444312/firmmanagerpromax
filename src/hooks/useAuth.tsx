@@ -10,6 +10,7 @@ type User = {
   accessible_menus: string[];
   case_access_mode: string;
   picture?: string;
+  message_notifications?: boolean;
 };
 
 type AuthContextType = {
