@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { LayoutDashboard, Briefcase, Calendar, FolderOpen, ShieldAlert, LogOut, ChevronDown, ChevronRight, CheckSquare, Settings, Users, Bell, MessageSquare, Mail, FileText, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
+import WelcomeTour from './WelcomeTour';
 
 export default function Layout() {
   const { user, logout, uiConfig, token } = useAuth();
@@ -18,6 +19,20 @@ export default function Layout() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [showTour, setShowTour] = useState(false);
+
+  useEffect(() => {
+    // Check if the user has completed the major update tour
+    const hasCompletedTour = localStorage.getItem('major_update_tour_v1');
+    if (!hasCompletedTour) {
+      setShowTour(true);
+    }
+  }, []);
+
+  const completeTour = () => {
+    localStorage.setItem('major_update_tour_v1', 'completed');
+    setShowTour(false);
+  };
 
   const fetchUnreadMessages = async () => {
     if (!token || !supabase || !user) return;
@@ -198,6 +213,7 @@ export default function Layout() {
             return (
               <div key={item.path} className="mb-1">
                 <NavLink
+                  id={`nav-${item.id}`}
                   to={item.subItems ? '#' : item.path}
                   onClick={(e) => item.subItems ? toggleExpand(item.id, e) : undefined}
                   className={() => cn(
@@ -292,6 +308,8 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {showTour && <WelcomeTour onComplete={completeTour} />}
     </div>
   );
 }
