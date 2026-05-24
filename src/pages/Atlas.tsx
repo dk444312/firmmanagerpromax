@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
+import { safeJson } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -150,9 +151,9 @@ export default function Atlas() {
       const res = await fetch('/api/atlas/threads', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setThreads(data || []);
+      const data = await safeJson(res);
+      if (res.ok && !data.error) {
+        setThreads(Array.isArray(data) ? data : []);
       }
     } catch (e) {
       console.error("fetchThreads error:", e);
@@ -183,9 +184,9 @@ export default function Atlas() {
       }
 
       const res = await fetch('/api/cases', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (res.ok && !data.error) {
-        setCases(data);
+        setCases(Array.isArray(data) ? data : []);
       } else {
         setCases([]);
       }
@@ -229,7 +230,8 @@ export default function Atlas() {
           clientsContext: clients
         })
       });
-      const data = await res.json();
+      
+      const data = await safeJson(res);
       
       if (!res.ok || data.error) throw new Error(data.error || "Failed chat request");
 
@@ -273,9 +275,9 @@ export default function Atlas() {
       const res = await fetch(`/api/atlas/threads/${thread.id}/messages`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      const data = await safeJson(res);
       if (res.ok) {
-        const data = await res.json();
-        setMessages(data || []);
+        setMessages(Array.isArray(data) ? data : []);
       } else {
         setMessages([]);
       }

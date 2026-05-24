@@ -357,8 +357,8 @@ async function startServer() {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
-    if (token == null) return res.sendStatus(401);
-
+    if (token == null) return res.status(401).json({ error: "Unauthorized: No token provided" });
+ 
     if (token.startsWith('frontend_only_')) {
       try {
         const payloadString = Buffer.from(token.replace('frontend_only_', ''), 'base64').toString('utf8');
@@ -384,11 +384,11 @@ async function startServer() {
         (req as any).user = user;
         next();
       } catch (e) {
-        return res.sendStatus(403);
+        return res.status(403).json({ error: "Forbidden: Invalid token payload" });
       }
     } else {
       jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-        if (err) return res.sendStatus(403);
+        if (err) return res.status(403).json({ error: "Forbidden: Token verification failed" });
         (req as any).user = user;
         next();
       });
@@ -2178,7 +2178,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
 
     } catch (e: any) {
       console.error("Atlas Chatbot Error:", e);
-      res.status(500).json({ error: e.message || "Something went wrong in conversational engine" });
+      return res.status(500).json({ error: e.message || "Something went wrong in conversational engine" });
     }
   });
 
@@ -2359,6 +2359,11 @@ Dated at Lilongwe this 24th day of May, 2026.`;
 
       res.json({ suggestion: suggestionText + disclaimer });
     }
+  });
+
+  // Catch-all for API routes to ensure they always return JSON
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({ error: `API route ${req.method} ${req.url} not found` });
   });
 
   // Vite middleware for development

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
+import { safeJson } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   FileText, Sparkles, Download, Trash2, FileDown, 
@@ -106,7 +107,7 @@ export default function Drafting() {
           'Authorization': `Bearer ${token}`
         }
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!data.error) {
         setDrafts(data);
         if (data.length > 0 && !currentDraft.id) {
@@ -151,7 +152,7 @@ export default function Drafting() {
           'Authorization': `Bearer ${token}`
         }
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!data.error) {
         setCases(data);
       }
@@ -216,7 +217,7 @@ export default function Drafting() {
         },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       
       if (!data.error) {
         toast.success(isNew ? 'New pleadings model created' : 'Pleadings drafted document saved');
@@ -248,7 +249,7 @@ export default function Drafting() {
           'Authorization': `Bearer ${token}`
         }
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!data.error) {
         toast.success('Document deleted successfully');
         setDrafts(prev => prev.filter(d => d.id !== id));
@@ -292,7 +293,7 @@ export default function Drafting() {
           action_type: 'custom'
         })
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (data.suggestion) {
         setAiSuggestion(data.suggestion);
         toast.success("Atlas has completed your custom legal draft suggestion!");
