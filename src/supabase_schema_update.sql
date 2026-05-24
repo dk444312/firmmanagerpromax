@@ -35,6 +35,7 @@ ALTER TABLE staff ADD COLUMN IF NOT EXISTS message_notifications boolean DEFAULT
 ALTER TABLE staff ADD COLUMN IF NOT EXISTS allowed_cases uuid[] DEFAULT '{}';
 ALTER TABLE staff ADD COLUMN IF NOT EXISTS allowed_folders uuid[] DEFAULT '{}';
 ALTER TABLE staff ADD COLUMN IF NOT EXISTS emails text;
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS filing_logs jsonb DEFAULT '[]'::jsonb;
 ALTER TABLE firms ADD COLUMN IF NOT EXISTS ui_config jsonb DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS public.email_logs (
@@ -74,6 +75,8 @@ CREATE TABLE IF NOT EXISTS filing_logs (
 
 -- Ensure hours column exists if table was already created
 ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS hours NUMERIC DEFAULT 1;
+ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS staff_id UUID;
+ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS staff_name TEXT;
 
 -- Add RLS policies for filing_logs
 ALTER TABLE filing_logs ENABLE ROW LEVEL SECURITY;

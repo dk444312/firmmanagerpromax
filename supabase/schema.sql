@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS staff (
     allowed_cases UUID[] DEFAULT '{}',
     allowed_folders UUID[] DEFAULT '{}',
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'active')),
+    filing_logs JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -139,6 +140,9 @@ CREATE TABLE IF NOT EXISTS filing_logs (
 
 -- Ensure hours column exists
 ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS hours NUMERIC DEFAULT 1;
+ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS staff_id UUID;
+ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS staff_name TEXT;
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS filing_logs JSONB DEFAULT '[]'::jsonb;
 
 -- Add RLS for filing_logs
 ALTER TABLE filing_logs ENABLE ROW LEVEL SECURITY;
