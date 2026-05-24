@@ -33,6 +33,25 @@ export default function ManageClients() {
     const { error } = await supabase.from('cases').update({ client_id: clientId }).eq('id', caseId);
     if (!error) {
       setCases(cases.map(c => c.id === caseId ? { ...c, client_id: clientId } : c));
+      
+      if (clientId) {
+        // Send notification to staff assigned to this case
+        const caseRecord = cases.find(c => c.id === caseId);
+        const assignedStaff = caseRecord?.assigned_staff_ids;
+        if (assignedStaff && assignedStaff.length > 0) {
+           const clientRecord = clients.find(c => c.id === clientId);
+           fetch('/api/send-notification', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+             body: JSON.stringify({ 
+               userIds: assignedStaff, 
+               entityType: 'Client', 
+               entityName: clientRecord?.full_name || 'Client', 
+               message: `Client ${clientRecord?.full_name} has been linked to case ${caseRecord?.title}.` 
+             })
+           }).catch(console.error);
+        }
+      }
     } else {
       console.error(error);
       alert("Failed to link case");

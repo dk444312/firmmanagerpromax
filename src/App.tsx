@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -20,14 +21,18 @@ import Tasks from './pages/Tasks';
 import CaseDetails from './pages/CaseDetails';
 import DiaryUpcoming from './pages/DiaryUpcoming';
 import DiaryPast from './pages/DiaryPast';
+import Appointments from './pages/Appointments';
 import FilesHours from './pages/FilesHours';
 import CaseWorkspace from './pages/CaseWorkspace';
 import NotificationsPage from './pages/Notifications';
 import Settings from './pages/Settings';
 import Clients from './pages/Clients';
 import ManageClients from './pages/ManageClients';
+import Emails from './pages/Emails';
 
 import Messages from './pages/Messages';
+import Drafting from './pages/Drafting';
+import Atlas from './pages/Atlas';
 
 function ProtectedRoute({ children, reqMenu }: { children: React.ReactNode, reqMenu?: string }) {
   const { user, loading } = useAuth();
@@ -45,6 +50,7 @@ function ProtectedRoute({ children, reqMenu }: { children: React.ReactNode, reqM
 export default function App() {
   return (
     <AuthProvider>
+      <Toaster position="top-right" toastOptions={{ style: { background: '#333', color: '#fff' } }} />
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -62,6 +68,7 @@ export default function App() {
             <Route path="/diary" element={<ProtectedRoute reqMenu="diary"><Diary /></ProtectedRoute>} />
             <Route path="/diary/upcoming" element={<ProtectedRoute reqMenu="diary"><DiaryUpcoming /></ProtectedRoute>} />
             <Route path="/diary/past" element={<ProtectedRoute reqMenu="diary"><DiaryPast /></ProtectedRoute>} />
+            <Route path="/diary/appointments" element={<ProtectedRoute reqMenu="diary"><Appointments /></ProtectedRoute>} />
             
             <Route path="/files" element={<ProtectedRoute reqMenu="files"><Files /></ProtectedRoute>} />
             <Route path="/files/:folderId" element={<ProtectedRoute reqMenu="files"><FolderDetails /></ProtectedRoute>} />
@@ -70,7 +77,10 @@ export default function App() {
             <Route path="/clients" element={<ProtectedRoute reqMenu="clients"><Clients /></ProtectedRoute>} />
             <Route path="/clients/manage" element={<ProtectedRoute reqMenu="clients"><ManageClients /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute reqMenu="admin"><Admin /></ProtectedRoute>} />
+            <Route path="/drafting" element={<ProtectedRoute><Drafting /></ProtectedRoute>} />
+            <Route path="/atlas" element={<ProtectedRoute><Atlas /></ProtectedRoute>} />
             <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
+            <Route path="/emails" element={<ProtectedRoute><Emails /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS staff (
     role TEXT NOT NULL CHECK (role IN ('Managing Partner', 'Associate', 'Advocate', 'Intern', 'Clerk', 'Secretary')),
     accessible_menus TEXT[] DEFAULT '{}',
     case_access_mode TEXT DEFAULT 'assigned' CHECK (case_access_mode IN ('assigned', 'all')),
+    allowed_cases UUID[] DEFAULT '{}',
+    allowed_folders UUID[] DEFAULT '{}',
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'active')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -119,8 +121,70 @@ CREATE TABLE IF NOT EXISTS file_time_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Table for filing logs
+CREATE TABLE IF NOT EXISTS filing_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    staff_id UUID REFERENCES staff(id) ON DELETE SET NULL,
+    staff_name TEXT,
+    date DATE NOT NULL,
+    document TEXT NOT NULL,
+    rate_mwk NUMERIC NOT NULL,
+    case_id UUID REFERENCES cases(id) ON DELETE CASCADE,
+    case_title TEXT,
+    file_id UUID REFERENCES files(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 
 -- Note: When initializing the first time, you might want to run:
 -- INSERT INTO firms (name) VALUES ('Default Law Firm');
 -- INSERT INTO staff (firm_id, name, username, role, status) VALUES ((SELECT id FROM firms LIMIT 1), 'Managing Partner', 'admin', 'Managing Partner', 'active');
 -- And then update the password parameter for the admin after creating it via setup, or have a default seeded password hash.
+
+-- Table for clients
+CREATE TABLE IF NOT EXISTS public.clients (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+    full_name TEXT NOT NULL,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    email TEXT,
+    phone TEXT,
+    company TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Table for appointments
+CREATE TABLE IF NOT EXISTS appointments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+    staff_id UUID REFERENCES staff(id) ON DELETE SET NULL,
+    date DATE NOT NULL,
+    time TIME NOT NULL,
+    reason TEXT,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Table for email_logs
+CREATE TABLE IF NOT EXISTS public.email_logs (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  firm_id uuid not null,
+  recipient_id uuid null,
+  recipient_email text not null,
+  subject text not null,
+  body text null,
+  sent_at timestamp with time zone null default now(),
+  status text null default 'sent'::text,
+  constraint email_logs_pkey primary key (id)
+);
+
+-- Enable Row Level Security and add globally permissive policies so no database clients are blocked
+ALTER TABLE public.email_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public select" ON public.email_logs FOR SELECT USING (true);
+CREATE POLICY "Allow public insert" ON public.email_logs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update" ON public.email_logs FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete" ON public.email_logs FOR DELETE USING (true);

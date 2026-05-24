@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="primary-sky" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="60%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+  <!-- Background subtle design -->
+  <circle cx="50" cy="50" r="45" fill="none" stroke="url(#primary-sky)" stroke-width="1.5" opacity="0.15"/>
+  <circle cx="50" cy="50" r="40" fill="none" stroke="url(#primary-sky)" stroke-width="1" stroke-dasharray="3,3" opacity="0.3"/>
+  <circle cx="50" cy="50" r="30" fill="none" stroke="url(#primary-sky)" stroke-width="0.5" opacity="0.2"/>
+  
+  <!-- Outer Orbit Rings (Representing Atlas global coordinate networks) -->
+  <ellipse cx="50" cy="50" rx="36" ry="12" fill="none" stroke="url(#primary-sky)" stroke-dasharray="2,2" stroke-width="1" transform="rotate(-30 50 50)" opacity="0.4" />
+  <ellipse cx="50" cy="50" rx="36" ry="12" fill="none" stroke="url(#primary-sky)" stroke-width="1" transform="rotate(30 50 50)" opacity="0.4" />
+
+  <!-- Center-aligned Gavel and Scales of Law representation -->
+  <!-- Scales horizontal bar -->
+  <path d="M28 36 L72 36" fill="none" stroke="url(#primary-sky)" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Center vertical pillar -->
+  <path d="M50 28 L50 72" fill="none" stroke="url(#primary-sky)" stroke-width="3" stroke-linecap="round"/>
+  <!-- Base stand -->
+  <path d="M38 72 L62 72" fill="none" stroke="url(#primary-sky)" stroke-width="3.5" stroke-linecap="round"/>
+  
+  <!-- Hanging Scales Bowls -->
+  <path d="M28 36 L20 54 M28 36 L36 54" fill="none" stroke="url(#primary-sky)" stroke-width="1" opacity="0.6"/>
+  <path d="M20 54 C20 60 36 60 36 54 Z" fill="#1e293b" stroke="url(#primary-sky)" stroke-width="1.5"/>
+
+  <path d="M72 36 L64 54 M72 36 L80 54" fill="none" stroke="url(#primary-sky)" stroke-width="1" opacity="0.6"/>
+  <path d="M64 54 C64 60 80 60 80 54 Z" fill="#1e293b" stroke="url(#primary-sky)" stroke-width="1.5"/>
+
+  <!-- Glowing core points -->
+  <circle cx="50" cy="28" r="3.5" fill="#38bdf8"/>
+  <circle cx="28" cy="36" r="2" fill="#38bdf8"/>
+  <circle cx="72" cy="36" r="2" fill="#38bdf8"/>
+  <circle cx="50" cy="50" r="2.5" fill="#60a5fa"/>
+</svg>

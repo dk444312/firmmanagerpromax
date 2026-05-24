@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { LayoutDashboard, Briefcase, Calendar, FolderOpen, ShieldAlert, LogOut, ChevronDown, ChevronRight, CheckSquare, Settings, Users, Bell, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Calendar, FolderOpen, ShieldAlert, LogOut, ChevronDown, ChevronRight, CheckSquare, Settings, Users, Bell, MessageSquare, Mail, FileText, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 
@@ -144,6 +144,7 @@ export default function Layout() {
         { name: 'Overview', path: '/diary' },
         { name: 'Upcoming Events', path: '/diary/upcoming' },
         { name: 'Past Events', path: '/diary/past' },
+        { name: 'Appointments', path: '/diary/appointments' },
       ]
     },
     { 
@@ -153,8 +154,11 @@ export default function Layout() {
         { name: 'Filing', path: '/files/hours' },
       ]
     },
+    { name: 'Drafting', path: '/drafting', icon: FileText, id: 'drafting', always: true },
+    { name: 'ATLAS', path: '/atlas', icon: Sparkles, id: 'atlas', always: true },
     { name: 'Admin Matrix', path: '/admin', icon: ShieldAlert, id: 'admin', always: false },
     { name: 'Messages', path: '/messages', icon: MessageSquare, id: 'messages', always: true },
+    { name: 'Sent Emails', path: '/emails', icon: Mail, id: 'emails', always: true },
     { name: 'Settings', path: '/settings', icon: Settings, id: 'settings', always: true },
   ];
 
@@ -162,6 +166,20 @@ export default function Layout() {
     e.preventDefault();
     setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
   };
+
+  const isAtlasPage = location.pathname === '/atlas';
+
+  if (isAtlasPage) {
+    return (
+      <div className="flex h-screen bg-[#0d0d0e] text-white overflow-hidden">
+        <main className="flex-1 flex flex-col bg-[#0d0d0e] relative overflow-hidden">
+          <div className="flex-1 overflow-auto">
+            <Outlet />
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-[#0f0f0f] text-white overflow-hidden">

@@ -98,6 +98,25 @@ export default function Files() {
     }]).select().single();
     
     if (data) {
+      if (fileCaseId) {
+         // Optionally notify case assignees that a file was uploaded!
+         if (supabase) {
+             const { data: caseRecord } = await supabase.from('cases').select('assigned_staff_ids, title').eq('id', fileCaseId).single();
+             if (caseRecord && caseRecord.assigned_staff_ids && caseRecord.assigned_staff_ids.length > 0) {
+                fetch('/api/send-notification', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                  body: JSON.stringify({ 
+                    userIds: caseRecord.assigned_staff_ids.filter((id: string) => id !== user.id), 
+                    entityType: 'File', 
+                    entityName: data.filename, 
+                    message: `A new file has been uploaded to case ${caseRecord.title}.` 
+                  })
+                }).catch(console.error);
+             }
+         }
+      }
+
       setFiles([...files, {...data, case_title: fileCaseTitle}]);
       setUploadMode('none');
       setFileCaseId('');

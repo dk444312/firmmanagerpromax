@@ -68,9 +68,27 @@ export default function Tasks() {
     
     if (isEditing) {
       await supabase.from('tasks').update(payload).eq('id', currentTask.id);
+      
+      // Send notification
+      if (payload.assigned_to && payload.assigned_to.length > 0) {
+        fetch('/api/send-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ userIds: payload.assigned_to, entityType: 'Task', entityName: payload.name, message: `Task details have been updated. Due: ${payload.due_date || 'N/A'}` })
+        }).catch(console.error);
+      }
     } else {
       delete payload.id;
       await supabase.from('tasks').insert([{ ...payload, firm_id: user.firm_id }]);
+      
+      // Send notification
+      if (payload.assigned_to && payload.assigned_to.length > 0) {
+        fetch('/api/send-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ userIds: payload.assigned_to, entityType: 'Task', entityName: payload.name, message: `You have been assigned to a new task. Due: ${payload.due_date || 'N/A'}` })
+        }).catch(console.error);
+      }
     }
     fetchData();
     setIsModalOpen(false);

@@ -144,6 +144,18 @@ export default function Admin() {
       });
 
       await supabase.from('staff').update(updates).eq('id', staffId);
+
+      // Need to notify if allowed_cases or allowed_folders is updated
+      if (updates.allowed_cases || updates.allowed_folders) {
+        let msg = '';
+        if (updates.allowed_cases) msg += `You have been granted access to specific cases. `;
+        if (updates.allowed_folders) msg += `You have been granted access to specific folders. `;
+        fetch('/api/send-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ userIds: [staffId], entityType: 'Access Update', entityName: 'Workspace', message: msg })
+        }).catch(console.error);
+      }
     } catch (e) {
       fetchData();
     }

@@ -102,6 +102,14 @@ export default function Cases() {
         case_id: created.id 
       }]);
 
+      // Note: By default the case is assigned to [user.id] which is the person creating it,
+      // so notifying them might be redundant, but we handle it just in case.
+      fetch('/api/send-notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userIds: [user.id], entityType: 'Case', entityName: created.title, message: `You have created and been assigned to a new case.` })
+      }).catch(console.error);
+
       setCases([...cases, created]);
       setIsAdding(false);
       setTitleMode('auto');

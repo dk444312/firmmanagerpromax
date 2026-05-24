@@ -38,17 +38,20 @@ export default function Diary() {
   const [currentEvent, setCurrentEvent] = useState<FirmEvent>({ id: '', title: '', description: '', date: '', time: '', type: 'Court Date', case_id: '', case_title: '' });
 
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [appointments, setAppointments] = useState<any[]>([]);
 
   const fetchData = async () => {
     if (!token || !supabase || !user) return;
     try {
-      const [evRes, taskRes] = await Promise.all([
+      const [evRes, taskRes, aptRes] = await Promise.all([
         supabase.from('events').select('*').eq('firm_id', user.firm_id),
-        supabase.from('tasks').select('*').eq('firm_id', user.firm_id)
+        supabase.from('tasks').select('*').eq('firm_id', user.firm_id),
+        supabase.from('appointments').select('*').eq('firm_id', user.firm_id)
       ]);
       
       let evs = evRes.data || [];
       let tsks = taskRes.data || [];
+      let apts = aptRes.data || [];
       
       if (user.role !== 'Managing Partner' && user.case_access_mode === 'assigned') {
         const allowedCases = user.allowed_cases || [];
@@ -58,6 +61,7 @@ export default function Diary() {
       
       setEvents(evs);
       setTasks(tsks);
+      setAppointments(apts);
     } catch (e) {
       console.error(e);
     } finally {
@@ -264,6 +268,7 @@ export default function Diary() {
             const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth()+1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const dayEvents = filteredEvents.filter(e => e.date === dateStr);
             const dayTasks = filteredTasks.filter(t => t.due_date === dateStr);
+            const dayAppointments = appointments.filter(a => a.date === dateStr);
             const isToday = new Date().toISOString().split('T')[0] === dateStr;
 
             return (
@@ -280,6 +285,18 @@ export default function Diary() {
                       title={`Event: ${e.time} - ${e.title}`}
                     >
                       <span className="font-semibold">{e.time}</span> {e.title}
+                    </div>
+                  ))}
+                  {dayAppointments.map(a => (
+                    <div 
+                      key={a.id}
+                      className={`text-[10px] p-1 px-2 rounded truncate transition-all ${
+                        a.status === 'confirmed' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 
+                        a.status === 'pending' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20 opacity-50'
+                      }`}
+                      title={`Appointment: ${a.time} - ${a.reason || 'No reason'}`}
+                    >
+                      <span className="font-semibold">{a.time}</span> {a.client?.full_name || 'Client Appt'}
                     </div>
                   ))}
                   {dayTasks.map(t => (
