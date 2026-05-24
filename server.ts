@@ -20,9 +20,21 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_dev";
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-const ai = (process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY)
+// Gemini AI Configuration with robust environment variable detection
+const GEMINI_KEY = process.env.GEMINI_API_KEY || 
+                   process.env.VITE_GEMINI_API_KEY || 
+                   process.env.GOOGLE_API_KEY || 
+                   process.env.GOOGLE_GENAI_API_KEY || "";
+
+if (GEMINI_KEY) {
+  console.log(`[AI Configuration] Gemini API Key detected (prefix: ${GEMINI_KEY.substring(0, 4)}...)`);
+} else {
+  console.warn(`[AI Configuration] No Gemini API Key found in process.env`);
+}
+
+const ai = GEMINI_KEY
   ? new GoogleGenAI({
-      apiKey: (process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY)!,
+      apiKey: GEMINI_KEY,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build'
@@ -36,9 +48,8 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_KEY
   : null;
 
 const FALLBACK_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-2.5-pro",
-  "gemini-2.5-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
   "gemini-2.0-flash"
 ];
 
@@ -345,7 +356,22 @@ async function startServer() {
   const PORT = process.env.PORT || 3000;
 
   app.use(cors());
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+      console.log(`[API Request] ${req.method} ${req.path}`);
+    }
+    next();
+  });
   app.use(express.json({ limit: '50mb' }));
+
+  // Global error handler for body parsing or other middleware errors
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && (err as any).status === 400 && 'body' in err) {
+      console.error('[API JSON Error]', err);
+      return res.status(400).json({ error: "Invalid JSON body", details: err.message });
+    }
+    next(err);
+  });
 
   // Health check
   app.get("/api/health", (req, res) => {
@@ -1876,8 +1902,8 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
       let eventToSchedule = null;
 
       if (!ai) {
-        // Fallback simulation chatbot when GEMINI_API_KEY is not configured
-        const helpMessage = "*(System Notice: GEMINI_API_KEY is not detected in your server environment (Render). Please ensure you have added GEMINI_API_KEY in your Environment Variables settings on Render. Do not use import.meta.env for server-side keys.)*";
+        // Fallback simulation chatbot when Gemini is not configured
+        const helpMessage = "*(System Notice: Gemini AI is not fully configured. Please ensure you have added your API Key to the environment variables. Supported variable names: GEMINI_API_KEY, GOOGLE_API_KEY. If you are using Render, add it in the Environment section of your Dashboard. Note: You must NOT use import.meta.env for server-side secrets as it will expose them to the browser or fail in Node.js.)*";
         const isCreatingTaskExplicitly = (message.toLowerCase().includes("create task") || message.toLowerCase().includes("assign task") || message.toLowerCase().includes("schedule") || message.toLowerCase().includes("add event") || message.toLowerCase().includes("book event")) && (message.toLowerCase().includes("please") || message.toLowerCase().includes("must") || message.toLowerCase().includes("now") || message.toLowerCase().includes("draft") || message.toLowerCase().includes("for me"));
         const lower = message.toLowerCase();
 
@@ -2364,6 +2390,18 @@ Dated at Lilongwe this 24th day of May, 2026.`;
   // Catch-all for API routes to ensure they always return JSON
   app.all("/api/*", (req, res) => {
     res.status(404).json({ error: `API route ${req.method} ${req.url} not found` });
+  });
+
+  // Global error handler for API routes
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path.startsWith('/api/')) {
+      console.error("API Error Captured:", err);
+      return res.status(err.status || 500).json({ 
+        error: err.message || "Internal Server Error",
+        details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      });
+    }
+    next(err);
   });
 
   // Vite middleware for development

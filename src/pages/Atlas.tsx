@@ -220,14 +220,7 @@ export default function Atlas() {
           caseId: selectedCaseId || null, 
           history, 
           allowCaseAccess,
-          threadId: activeThreadId,
-          casesContext: cases,
-          tasksContext: tasks,
-          filesContext: files,
-          eventsContext: events,
-          staffContext: staff,
-          emailsContext: emails,
-          clientsContext: clients
+          threadId: activeThreadId
         })
       });
       
