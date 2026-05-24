@@ -58,8 +58,8 @@ export default function Login() {
         }
 
         // Just fake a token for frontend only auth
-        const fakeToken = "frontend_only_" + btoa(JSON.stringify({ id: staffMember.id, role: staffMember.role }));
         const { password_hash, ...userProfile } = staffMember;
+        const fakeToken = "frontend_only_" + btoa(JSON.stringify(userProfile));
         login(fakeToken, userProfile);
         navigate('/dashboard');
         return;

@@ -114,3 +114,24 @@ CREATE TABLE IF NOT EXISTS public.drafting_documents (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Create Atlas AI Chat tables
+CREATE TABLE IF NOT EXISTS public.atlas_threads (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    title TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.atlas_messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    thread_id UUID NOT NULL REFERENCES atlas_threads(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE public.atlas_threads DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.atlas_messages DISABLE ROW LEVEL SECURITY;

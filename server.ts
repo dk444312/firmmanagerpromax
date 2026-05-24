@@ -35,6 +35,31 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) 
   : null;
 
+const FALLBACK_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash"
+];
+
+async function generateContentWithFallback(ai: any, params: any) {
+  let lastError: any;
+  for (const model of FALLBACK_MODELS) {
+    try {
+      const p = { ...params, model };
+      return await ai.models.generateContent(p);
+    } catch (e: any) {
+      console.warn(`Model ${model} failed:`, e.message);
+      lastError = e;
+      if (e.status === 429 || e.status === 503 || e.message?.toLowerCase().includes("quota") || e.message?.toLowerCase().includes("exhausted")) {
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError;
+}
+
 // Helper to validate UUID format to avoid Postgres casting exceptions
 const isValidUUID = (val: any): boolean => {
   if (typeof val !== 'string') return false;
@@ -328,7 +353,7 @@ async function startServer() {
   });
 
   // API Middleware for auth
-  const authenticateToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const authenticateToken = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
@@ -338,6 +363,24 @@ async function startServer() {
       try {
         const payloadString = Buffer.from(token.replace('frontend_only_', ''), 'base64').toString('utf8');
         const user = JSON.parse(payloadString);
+        
+        // Ensure firm_id is present for older cached tokens
+        if (!user.firm_id) {
+          if (supabase && isValidUUID(user.id)) {
+            const { data } = await supabase.from('staff').select('firm_id, name').eq('id', user.id).single();
+            if (data) {
+              user.firm_id = data.firm_id;
+              user.name = data.name;
+            }
+          } else {
+            const mockStaff = db.mockStaff.find((s: any) => s.id === user.id);
+            if (mockStaff) {
+              user.firm_id = mockStaff.firm_id;
+              user.name = mockStaff.name;
+            }
+          }
+        }
+        
         (req as any).user = user;
         next();
       } catch (e) {
@@ -1299,10 +1342,12 @@ async function startServer() {
     if (supabase && isValidUUID(user.firm_id)) {
       try {
         const { data, error } = await supabase.from('email_logs').insert([supabaseLog]).select();
-        if (!error && data && data.length > 0) {
-          created = data[0];
-        } else {
+        if (error) {
           console.error("Supabase email_log insert failure:", error);
+          throw new Error("Supabase Error: " + error.message);
+        }
+        if (data && data.length > 0) {
+          created = data[0];
         }
       } catch (e) {
         console.error("Supabase insert catch error:", e);
@@ -1738,24 +1783,13 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
               }])
               .select()
               .single();
-            if (error) throw error;
+            if (error) {
+              return res.status(500).json({ error: "Supabase Error creating thread: " + error.message });
+            }
             activeThread = data;
             threadId = data.id;
-          } catch (e) {
-            // Local fallback
-            const localThread = {
-              id: `thread_${Date.now()}`,
-              firm_id: user.firm_id,
-              user_id: user.id,
-              title: threadTitle,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            };
-            db.mockAtlasThreads = db.mockAtlasThreads || [];
-            db.mockAtlasThreads.push(localThread);
-            saveDb();
-            activeThread = localThread;
-            threadId = localThread.id;
+          } catch (e: any) {
+            return res.status(500).json({ error: "Supabase Exception: " + e.message });
           }
         } else {
           const localThread = {
@@ -1803,17 +1837,11 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
             content: message,
             created_at: new Date().toISOString()
           }]);
-          if (error) throw error;
-        } catch (e) {
-          db.mockAtlasMessages = db.mockAtlasMessages || [];
-          db.mockAtlasMessages.push({
-            id: `msg_${Date.now()}`,
-            thread_id: threadId,
-            role: 'user',
-            content: message,
-            created_at: new Date().toISOString()
-          });
-          saveDb();
+          if (error) {
+            return res.status(500).json({ error: "Supabase Error saving user message: " + error.message });
+          }
+        } catch (e: any) {
+          return res.status(500).json({ error: e.message });
         }
       } else {
         db.mockAtlasMessages = db.mockAtlasMessages || [];
@@ -1967,8 +1995,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
         });
 
         try {
-          const response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+          const response = await generateContentWithFallback(ai, {
             contents: listContents,
             config: {
               systemInstruction,
@@ -2121,17 +2148,11 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
             content: replyText,
             created_at: new Date().toISOString()
           }]);
-          if (error) throw error;
-        } catch (e) {
-          db.mockAtlasMessages = db.mockAtlasMessages || [];
-          db.mockAtlasMessages.push({
-            id: `msg_model_${Date.now()}`,
-            thread_id: threadId,
-            role: 'model',
-            content: replyText,
-            created_at: new Date().toISOString()
-          });
-          saveDb();
+          if (error) {
+            return res.status(500).json({ error: "Supabase Error saving ai response: " + error.message });
+          }
+        } catch (e: any) {
+          return res.status(500).json({ error: e.message });
         }
       } else {
         db.mockAtlasMessages = db.mockAtlasMessages || [];
@@ -2157,6 +2178,32 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
       console.error("Atlas Chatbot Error:", e);
       res.status(500).json({ error: e.message || "Something went wrong in conversational engine" });
     }
+  });
+
+  app.get("/api/debug-user", authenticateToken, (req, res) => {
+    res.json({ user: (req as any).user });
+  });
+
+  app.get("/api/debug-supabase", async (req, res) => {
+    if (!supabase) return res.json({ error: "No supabase" });
+    const resDraft = await supabase.from('drafting_documents').insert([{
+      id: crypto.randomUUID(), firm_id: "00000000-0000-0000-0000-000000000000", title: "Test", content: "test string"
+    }]);
+    const resThread = await supabase.from('atlas_threads').insert([{
+      id: crypto.randomUUID(), firm_id: "00000000-0000-0000-0000-000000000000", user_id: "00000000-0000-0000-0000-000000000000", title: "test"
+    }]);
+    const resEmail = await supabase.from('email_logs').insert([{
+      id: crypto.randomUUID(), firm_id: "00000000-0000-0000-0000-000000000000", recipient_email: "test@test.com", subject: "test", body: "test", status: "sent"
+    }]);
+    
+    // Also log user firm_id mapping if possible.
+    const keyInfo = {
+      used: SUPABASE_SERVICE_KEY.substring(0, 15),
+      anon: process.env.SUPABASE_ANON_KEY?.substring(0, 15),
+      service: process.env.SUPABASE_SERVICE_ROLE_KEY?.substring(0, 15)
+    };
+
+    res.json({ draft: resDraft.error, thread: resThread.error, email: resEmail.error, keyInfo });
   });
 
   // --- Drafting Documents CRUD Operations ---
@@ -2194,15 +2241,12 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
       try {
         const { data, error } = await supabase.from('drafting_documents').insert([newDoc]).select().single();
         if (error) {
-          db.mockDrafts.push(newDoc);
-          saveDb();
-          return res.json(newDoc);
+          console.error("Drafting documents insert error:", error);
+          return res.status(500).json({ error: "Supabase Error: " + error.message });
         }
-        res.json(data);
-      } catch (e) {
-        db.mockDrafts.push(newDoc);
-        saveDb();
-        res.json(newDoc);
+        return res.json(data);
+      } catch (e: any) {
+        return res.status(500).json({ error: e.message || "Unknown database error" });
       }
     } else {
       db.mockDrafts.push(newDoc);
@@ -2290,8 +2334,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
         userPrompt = `Refine and expand the draft instruction for: "${prompt}".\nFor document: "${title}" (${template_type}).`;
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+      const response = await generateContentWithFallback(ai, {
         contents: userPrompt,
         config: { systemInstruction }
       });
