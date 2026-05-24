@@ -20,9 +20,9 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_dev";
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-const ai = process.env.GEMINI_API_KEY 
+const ai = (process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY)
   ? new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey: (process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY)!,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build'
@@ -1877,6 +1877,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
 
       if (!ai) {
         // Fallback simulation chatbot when GEMINI_API_KEY is not configured
+        const helpMessage = "*(System Notice: GEMINI_API_KEY is not detected in your server environment (Render). Please ensure you have added GEMINI_API_KEY in your Environment Variables settings on Render. Do not use import.meta.env for server-side keys.)*";
         const isCreatingTaskExplicitly = (message.toLowerCase().includes("create task") || message.toLowerCase().includes("assign task") || message.toLowerCase().includes("schedule") || message.toLowerCase().includes("add event") || message.toLowerCase().includes("book event")) && (message.toLowerCase().includes("please") || message.toLowerCase().includes("must") || message.toLowerCase().includes("now") || message.toLowerCase().includes("draft") || message.toLowerCase().includes("for me"));
         const lower = message.toLowerCase();
 
@@ -1978,6 +1979,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
           // Standard pleasant short greeting
           replyText = `Hello! I am ATLAS, your simple court advisory algorithm. Ask me to list task documents, display active litigation files, or advice on workflow actions!`;
         }
+        replyText = replyText + "\n\n" + helpMessage;
       } else {
         // Format previous chatbot history for context API integration
         const listContents = [];
@@ -2318,7 +2320,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
     const { title, template_type, prompt, original_content, action_type } = req.body;
     if (!ai) {
       return res.json({
-        suggestion: `[Atlas Co-Writer Simulation Mode]\n\nSince GEMINI_API_KEY environment variable is not defined, here is a simulated professional court suggestion for "${title}" (${template_type}):\n\n"AND BY CONCURRENCE with the Civil Procedure Rules of Malawi, notice is hereby served that this court shall be moved on the date below written for an order to stay proceedings in this suit pending settlement."`
+        suggestion: `[Atlas Co-Writer Simulation Mode]\n\n*(Notice: GEMINI_API_KEY is not configured in your Render environment variables. This is required for AI features. Operating in Atlas Simulation Mode.)*\n\nSince GEMINI_API_KEY environment variable is not defined, here is a simulated professional court suggestion for "${title}" (${template_type}):\n\n"AND BY CONCURRENCE with the Civil Procedure Rules of Malawi, notice is hereby served that this court shall be moved on the date below written for an order to stay proceedings in this suit pending settlement."`
       });
     }
 
