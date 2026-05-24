@@ -68,13 +68,22 @@ export default function Layout() {
       oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
       const sinceISO = oneWeekAgo.toISOString();
 
+      const fetchTable = async (table: string, query: any) => {
+        const { data, error } = await query;
+        if (error) {
+          console.error(`[Supabase Error] Table: ${table}`, error);
+          return { data: [] };
+        }
+        return { data };
+      };
+
       const [casesRes, filesRes, tasksRes, eventsRes, filingsRes, requiresApprovalRes] = await Promise.all([
-        supabase.from('cases').select('id, title, created_at').eq('firm_id', user.firm_id).gte('created_at', sinceISO),
-        supabase.from('files').select('id, filename, created_at, uploaded_by, requires_approval, approval_status, folder_id').eq('firm_id', user.firm_id).gte('created_at', sinceISO),
-        supabase.from('tasks').select('id, name, created_at').eq('firm_id', user.firm_id).gte('created_at', sinceISO),
-        supabase.from('events').select('id, title, created_at').eq('firm_id', user.firm_id).gte('created_at', sinceISO),
-        supabase.from('filing_logs').select('id, document, date, created_at, rate_mwk, staff_name').eq('firm_id', user.firm_id).gte('created_at', sinceISO),
-        (user.role === 'Admin' || user.role === 'Managing Partner') ? supabase.from('files').select('id, filename, created_at, folder_id, uploaded_by').eq('firm_id', user.firm_id).eq('requires_approval', true).eq('approval_status', 'pending') : Promise.resolve({ data: [] })
+        fetchTable('cases', supabase.from('cases').select('id, title, created_at').eq('firm_id', user.firm_id).gte('created_at', sinceISO)),
+        fetchTable('files', supabase.from('files').select('id, filename, created_at, uploaded_by, requires_approval, approval_status, folder_id').eq('firm_id', user.firm_id).gte('created_at', sinceISO)),
+        fetchTable('tasks', supabase.from('tasks').select('id, name, created_at').eq('firm_id', user.firm_id).gte('created_at', sinceISO)),
+        fetchTable('events', supabase.from('events').select('id, title, created_at').eq('firm_id', user.firm_id).gte('created_at', sinceISO)),
+        fetchTable('filing_logs', supabase.from('filing_logs').select('id, document, date, created_at, rate_mwk, staff_name').eq('firm_id', user.firm_id).gte('created_at', sinceISO)),
+        (user.role === 'Admin' || user.role === 'Managing Partner') ? fetchTable('files_approval', supabase.from('files').select('id, filename, created_at, folder_id, uploaded_by').eq('firm_id', user.firm_id).eq('requires_approval', true).eq('approval_status', 'pending')) : Promise.resolve({ data: [] })
       ]);
 
       const allNotifs: any[] = [];

@@ -15,6 +15,7 @@ type FilingLog = {
   case_id?: string;
   case_title?: string;
   file_id?: string;
+  created_at?: string;
 };
 
 type FirmFile = { 
@@ -84,6 +85,10 @@ export default function Filing() {
         supabase.from('files').select('*').eq('firm_id', user.firm_id),
         supabase.from('filing_logs').select('*').eq('firm_id', user.firm_id)
       ]);
+      
+      if (filesRes.error) console.error("Supabase Error fetching files:", filesRes.error);
+      if (logsRes.error) console.error("Supabase Error fetching filing_logs:", logsRes.error);
+
       const fileData = filesRes.data || [];
       const logData = logsRes.data || [];
       
