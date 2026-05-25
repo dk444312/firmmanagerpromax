@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS staff (
     allowed_cases UUID[] DEFAULT '{}',
     allowed_folders UUID[] DEFAULT '{}',
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'active')),
-    filing_logs JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -131,25 +130,11 @@ CREATE TABLE IF NOT EXISTS filing_logs (
     date DATE NOT NULL,
     document TEXT NOT NULL,
     rate_mwk NUMERIC NOT NULL,
-    hours NUMERIC DEFAULT 1,
     case_id UUID REFERENCES cases(id) ON DELETE CASCADE,
     case_title TEXT,
     file_id UUID REFERENCES files(id) ON DELETE CASCADE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-
--- Ensure hours column exists
-ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS hours NUMERIC DEFAULT 1;
-ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS staff_id UUID;
-ALTER TABLE filing_logs ADD COLUMN IF NOT EXISTS staff_name TEXT;
-ALTER TABLE staff ADD COLUMN IF NOT EXISTS filing_logs JSONB DEFAULT '[]'::jsonb;
-
--- Add RLS for filing_logs
-ALTER TABLE filing_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow public select filing_logs" ON filing_logs FOR SELECT USING (true);
-CREATE POLICY "Allow public insert filing_logs" ON filing_logs FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update filing_logs" ON filing_logs FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete filing_logs" ON filing_logs FOR DELETE USING (true);
 
 
 -- Note: When initializing the first time, you might want to run:

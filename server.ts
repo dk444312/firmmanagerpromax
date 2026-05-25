@@ -20,21 +20,9 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_dev";
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-// Gemini AI Configuration with robust environment variable detection
-const GEMINI_KEY = process.env.GEMINI_API_KEY || 
-                   process.env.VITE_GEMINI_API_KEY || 
-                   process.env.GOOGLE_API_KEY || 
-                   process.env.GOOGLE_GENAI_API_KEY || "";
-
-if (GEMINI_KEY) {
-  console.log(`[AI Configuration] Gemini API Key detected (prefix: ${GEMINI_KEY.substring(0, 4)}...)`);
-} else {
-  console.warn(`[AI Configuration] No Gemini API Key found in process.env`);
-}
-
-const ai = GEMINI_KEY
+const ai = process.env.GEMINI_API_KEY 
   ? new GoogleGenAI({
-      apiKey: GEMINI_KEY,
+      apiKey: process.env.GEMINI_API_KEY,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build'
@@ -48,8 +36,9 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_KEY
   : null;
 
 const FALLBACK_MODELS = [
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
+  "gemini-3.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
   "gemini-2.0-flash"
 ];
 
@@ -356,22 +345,7 @@ async function startServer() {
   const PORT = process.env.PORT || 3000;
 
   app.use(cors());
-  app.use((req, res, next) => {
-    if (req.path.startsWith('/api/')) {
-      console.log(`[API Request] ${req.method} ${req.path}`);
-    }
-    next();
-  });
   app.use(express.json({ limit: '50mb' }));
-
-  // Global error handler for body parsing or other middleware errors
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (err instanceof SyntaxError && (err as any).status === 400 && 'body' in err) {
-      console.error('[API JSON Error]', err);
-      return res.status(400).json({ error: "Invalid JSON body", details: err.message });
-    }
-    next(err);
-  });
 
   // Health check
   app.get("/api/health", (req, res) => {
@@ -383,8 +357,8 @@ async function startServer() {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
-    if (token == null) return res.status(401).json({ error: "Unauthorized: No token provided" });
- 
+    if (token == null) return res.sendStatus(401);
+
     if (token.startsWith('frontend_only_')) {
       try {
         const payloadString = Buffer.from(token.replace('frontend_only_', ''), 'base64').toString('utf8');
@@ -410,11 +384,11 @@ async function startServer() {
         (req as any).user = user;
         next();
       } catch (e) {
-        return res.status(403).json({ error: "Forbidden: Invalid token payload" });
+        return res.sendStatus(403);
       }
     } else {
       jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-        if (err) return res.status(403).json({ error: "Forbidden: Token verification failed" });
+        if (err) return res.sendStatus(403);
         (req as any).user = user;
         next();
       });
@@ -1902,8 +1876,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
       let eventToSchedule = null;
 
       if (!ai) {
-        // Fallback simulation chatbot when Gemini is not configured
-        const helpMessage = "*(System Notice: Gemini AI is not fully configured. Please ensure you have added your API Key to the environment variables. Supported variable names: GEMINI_API_KEY, GOOGLE_API_KEY. If you are using Render, add it in the Environment section of your Dashboard. Note: You must NOT use import.meta.env for server-side secrets as it will expose them to the browser or fail in Node.js.)*";
+        // Fallback simulation chatbot when GEMINI_API_KEY is not configured
         const isCreatingTaskExplicitly = (message.toLowerCase().includes("create task") || message.toLowerCase().includes("assign task") || message.toLowerCase().includes("schedule") || message.toLowerCase().includes("add event") || message.toLowerCase().includes("book event")) && (message.toLowerCase().includes("please") || message.toLowerCase().includes("must") || message.toLowerCase().includes("now") || message.toLowerCase().includes("draft") || message.toLowerCase().includes("for me"));
         const lower = message.toLowerCase();
 
@@ -2005,7 +1978,6 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
           // Standard pleasant short greeting
           replyText = `Hello! I am ATLAS, your simple court advisory algorithm. Ask me to list task documents, display active litigation files, or advice on workflow actions!`;
         }
-        replyText = replyText + "\n\n" + helpMessage;
       } else {
         // Format previous chatbot history for context API integration
         const listContents = [];
@@ -2204,7 +2176,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
 
     } catch (e: any) {
       console.error("Atlas Chatbot Error:", e);
-      return res.status(500).json({ error: e.message || "Something went wrong in conversational engine" });
+      res.status(500).json({ error: e.message || "Something went wrong in conversational engine" });
     }
   });
 
@@ -2346,7 +2318,7 @@ Format your output EXACTLY according to the response JSON schema. 'reply' must c
     const { title, template_type, prompt, original_content, action_type } = req.body;
     if (!ai) {
       return res.json({
-        suggestion: `[Atlas Co-Writer Simulation Mode]\n\n*(Notice: GEMINI_API_KEY is not configured in your Render environment variables. This is required for AI features. Operating in Atlas Simulation Mode.)*\n\nSince GEMINI_API_KEY environment variable is not defined, here is a simulated professional court suggestion for "${title}" (${template_type}):\n\n"AND BY CONCURRENCE with the Civil Procedure Rules of Malawi, notice is hereby served that this court shall be moved on the date below written for an order to stay proceedings in this suit pending settlement."`
+        suggestion: `[Atlas Co-Writer Simulation Mode]\n\nSince GEMINI_API_KEY environment variable is not defined, here is a simulated professional court suggestion for "${title}" (${template_type}):\n\n"AND BY CONCURRENCE with the Civil Procedure Rules of Malawi, notice is hereby served that this court shall be moved on the date below written for an order to stay proceedings in this suit pending settlement."`
       });
     }
 
@@ -2385,23 +2357,6 @@ Dated at Lilongwe this 24th day of May, 2026.`;
 
       res.json({ suggestion: suggestionText + disclaimer });
     }
-  });
-
-  // Catch-all for API routes to ensure they always return JSON
-  app.all("/api/*", (req, res) => {
-    res.status(404).json({ error: `API route ${req.method} ${req.url} not found` });
-  });
-
-  // Global error handler for API routes
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (req.path.startsWith('/api/')) {
-      console.error("API Error Captured:", err);
-      return res.status(err.status || 500).json({ 
-        error: err.message || "Internal Server Error",
-        details: process.env.NODE_ENV === 'development' ? err.stack : undefined
-      });
-    }
-    next(err);
   });
 
   // Vite middleware for development

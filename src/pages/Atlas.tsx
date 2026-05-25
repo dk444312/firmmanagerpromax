@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
-import { safeJson } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -35,6 +34,8 @@ interface Thread {
   created_at: string;
   updated_at: string;
 }
+
+import ComingSoonOverlay from '../components/ComingSoonOverlay';
 
 export default function Atlas() {
   const { token, user } = useAuth();
@@ -151,9 +152,9 @@ export default function Atlas() {
       const res = await fetch('/api/atlas/threads', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await safeJson(res);
-      if (res.ok && !data.error) {
-        setThreads(Array.isArray(data) ? data : []);
+      if (res.ok) {
+        const data = await res.json();
+        setThreads(data || []);
       }
     } catch (e) {
       console.error("fetchThreads error:", e);
@@ -184,9 +185,9 @@ export default function Atlas() {
       }
 
       const res = await fetch('/api/cases', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await safeJson(res);
+      const data = await res.json();
       if (res.ok && !data.error) {
-        setCases(Array.isArray(data) ? data : []);
+        setCases(data);
       } else {
         setCases([]);
       }
@@ -220,11 +221,17 @@ export default function Atlas() {
           caseId: selectedCaseId || null, 
           history, 
           allowCaseAccess,
-          threadId: activeThreadId
+          threadId: activeThreadId,
+          casesContext: cases,
+          tasksContext: tasks,
+          filesContext: files,
+          eventsContext: events,
+          staffContext: staff,
+          emailsContext: emails,
+          clientsContext: clients
         })
       });
-      
-      const data = await safeJson(res);
+      const data = await res.json();
       
       if (!res.ok || data.error) throw new Error(data.error || "Failed chat request");
 
@@ -268,9 +275,9 @@ export default function Atlas() {
       const res = await fetch(`/api/atlas/threads/${thread.id}/messages`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await safeJson(res);
       if (res.ok) {
-        setMessages(Array.isArray(data) ? data : []);
+        const data = await res.json();
+        setMessages(data || []);
       } else {
         setMessages([]);
       }
@@ -564,7 +571,10 @@ export default function Atlas() {
 
   return (
     <div className="relative w-full h-screen bg-[#0d0d0e] text-slate-200 antialiased flex overflow-hidden" id="atlas-space" style={{ fontFamily: 'Poppins, sans-serif' }}>
-      
+      <ComingSoonOverlay 
+        title="ATLAS AI Advisor" 
+        description="Our premium AI litigation advisor is currently undergoing final calibration to provide the most accurate legal insights and precedent analysis." 
+      />
       {/* 1. CSS Custom Keyframe injection for the glowing/plasma dynamic emerald orb */}
       <style>{`
         @keyframes orbPlasmaRotate {

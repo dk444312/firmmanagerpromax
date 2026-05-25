@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
-import { safeJson } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   FileText, Sparkles, Download, Trash2, FileDown, 
@@ -11,6 +10,7 @@ import {
   Users, AlignLeft, FileCheck2, HelpCircle, PenTool
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import ComingSoonOverlay from '../components/ComingSoonOverlay';
 
 interface Case {
   id: string;
@@ -107,7 +107,7 @@ export default function Drafting() {
           'Authorization': `Bearer ${token}`
         }
       });
-      const data = await safeJson(res);
+      const data = await res.json();
       if (!data.error) {
         setDrafts(data);
         if (data.length > 0 && !currentDraft.id) {
@@ -152,7 +152,7 @@ export default function Drafting() {
           'Authorization': `Bearer ${token}`
         }
       });
-      const data = await safeJson(res);
+      const data = await res.json();
       if (!data.error) {
         setCases(data);
       }
@@ -217,7 +217,7 @@ export default function Drafting() {
         },
         body: JSON.stringify(payload)
       });
-      const data = await safeJson(res);
+      const data = await res.json();
       
       if (!data.error) {
         toast.success(isNew ? 'New pleadings model created' : 'Pleadings drafted document saved');
@@ -249,7 +249,7 @@ export default function Drafting() {
           'Authorization': `Bearer ${token}`
         }
       });
-      const data = await safeJson(res);
+      const data = await res.json();
       if (!data.error) {
         toast.success('Document deleted successfully');
         setDrafts(prev => prev.filter(d => d.id !== id));
@@ -293,7 +293,7 @@ export default function Drafting() {
           action_type: 'custom'
         })
       });
-      const data = await safeJson(res);
+      const data = await res.json();
       if (data.suggestion) {
         setAiSuggestion(data.suggestion);
         toast.success("Atlas has completed your custom legal draft suggestion!");
@@ -367,8 +367,11 @@ export default function Drafting() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 text-slate-100 min-h-screen" id="drafting-container" style={{ fontFamily: 'Poppins, sans-serif' }}>
-      
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 text-slate-100 min-h-screen relative" id="drafting-container" style={{ fontFamily: 'Poppins, sans-serif' }}>
+      <ComingSoonOverlay 
+        title="Drafting Suite" 
+        description="We are refining our automated pleadings and document generation engine to ensure complete compliance with local court standards." 
+      />
       {/* CASE 1: MAIN REPOSITORY VIEWER PANEL (NOT EDITING) */}
       {!isEditingMode ? (
         <div className="space-y-6">
