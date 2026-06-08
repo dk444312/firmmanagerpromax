@@ -89,8 +89,9 @@ async function sendAndLogEmail(firmId: string, recipientId: string, recipientEma
 
   try {
     if (resend) {
+      const fromEmail = process.env.RESEND_FROM_EMAIL || "Firm Notifications <onboarding@resend.dev>";
       await resend.emails.send({
-        from: "Firm Notifications <support@firmmanagerapp.com>",
+        from: fromEmail,
         to: [recipientEmail],
         subject,
         html: htmlTemplate
@@ -150,22 +151,56 @@ async function sendAndLogEmail(firmId: string, recipientId: string, recipientEma
 }
 
 // Function to trigger reminders (can be called by cron or manually via API)
-async function triggerReminders(targetFirmId?: string, targetUserId?: string, isManual = false) {
+async function triggerReminders(
+  targetFirmId?: string, 
+  targetUserId?: string, 
+  isManual = false,
+  options?: {
+    timeframe?: 'week' | 'month' | 'year' | 'custom';
+    customDays?: number;
+    sendTasks?: boolean;
+    sendEvents?: boolean;
+    isAuto?: boolean;
+  }
+) {
   let countTasks = 0;
   let countEvents = 0;
   
+  const now = new Date();
+  const getLimitDateStr = (tf?: string, days?: number) => {
+    const limit = new Date(now.getTime());
+    if (tf === 'week') {
+      limit.setDate(limit.getDate() + 7);
+    } else if (tf === 'month') {
+      limit.setDate(limit.getDate() + 30);
+    } else if (tf === 'year') {
+      limit.setDate(limit.getDate() + 365);
+    } else if (tf === 'custom') {
+      limit.setDate(limit.getDate() + (Number(days) || 14));
+    } else {
+      limit.setDate(limit.getDate() + 7); // Default to week
+    }
+    return limit.toISOString().split('T')[0];
+  };
+
+  const maxLimitDateStr = getLimitDateStr(options?.timeframe, options?.customDays);
+  const todayDateStr = now.toISOString().split('T')[0];
+  const sendTasksFlag = options?.sendTasks !== false;
+  const sendEventsFlag = options?.sendEvents !== false;
+  const tagStr = options?.isAuto ? "[AUTO] " : "";
+
   if (!supabase) {
     // Mock DB implementation
-    const now = new Date();
-    const todayDate = now.toISOString().split('T')[0];
-    
-    let tasks = db.mockTasks || [];
-    if (targetFirmId) tasks = tasks.filter((t:any) => t.firm_id === targetFirmId);
-    if (isManual) {
+    let tasks: any[] = [];
+    if (sendTasksFlag) {
+      tasks = db.mockTasks || [];
+      if (targetFirmId) tasks = tasks.filter((t:any) => t.firm_id === targetFirmId);
       tasks = tasks.filter((t:any) => t.status !== 'Completed');
-    } else {
-      const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
-      tasks = tasks.filter((t:any) => new Date(t.due_date) > now && new Date(t.due_date) < nextHour);
+      tasks = tasks.filter((t:any) => {
+        if (!t.due_date) return true;
+        const dDateStr = new Date(t.due_date).toISOString().split('T')[0];
+        return dDateStr <= maxLimitDateStr;
+      });
     }
     
     for (const t of tasks) {
@@ -179,19 +214,22 @@ async function triggerReminders(targetFirmId?: string, targetUserId?: string, is
       const assignedUsers = (db.mockStaff || []).filter((s:any) => userIdsToNotify.includes(s.id));
       for (const u of assignedUsers) {
          if (!u.emails || u.message_notifications === false) continue;
-         const subject = `Task Reminder: ${t.name}`;
-         const body = `<p>You have a pending task <strong>${t.name}</strong> due on ${new Date(t.due_date).toLocaleDateString()}.</p>`;
+         const subject = `${tagStr}Task Reminder: ${t.name}`;
+         const body = `<p>${options?.isAuto ? "This is an automated background alert. " : ""}You have a pending task <strong>${t.name}</strong> due on ${new Date(t.due_date).toLocaleDateString()}.</p>`;
          await sendAndLogEmail(u.firm_id, u.id, u.emails, subject, body, u.name);
          countTasks++;
       }
     }
     
-    let events = db.mockEvents || [];
-    if (targetFirmId) events = events.filter((e:any) => e.firm_id === targetFirmId);
-    if (!isManual) {
-      events = events.filter((e:any) => e.date === todayDate);
-    } else {
-      events = events.filter((e:any) => e.date >= todayDate);
+    let events: any[] = [];
+    if (sendEventsFlag) {
+      events = db.mockEvents || [];
+      if (targetFirmId) events = events.filter((e:any) => e.firm_id === targetFirmId);
+      events = events.filter((e:any) => e.date >= todayDateStr);
+      events = events.filter((e:any) => {
+        if (!e.date) return false;
+        return e.date <= maxLimitDateStr;
+      });
     }
     
     for (const e of events) {
@@ -201,8 +239,8 @@ async function triggerReminders(targetFirmId?: string, targetUserId?: string, is
       }
       for (const u of firmStaff) {
          if (!u.emails || u.message_notifications === false) continue;
-         const subject = `Upcoming Event: ${e.title}`;
-         const body = `<p>You have an upcoming event <strong>${e.title}</strong> scheduled on ${new Date(e.date).toLocaleDateString()} at ${e.time}.</p>`;
+         const subject = `${tagStr}Upcoming Event: ${e.title}`;
+         const body = `<p>${options?.isAuto ? "This is an automated background alert. " : ""}You have an upcoming event <strong>${e.title}</strong> scheduled on ${new Date(e.date).toLocaleDateString()} at ${e.time || 'N/A'}.</p>`;
          await sendAndLogEmail(u.firm_id, u.id, u.emails, subject, body, u.name);
          countEvents++;
       }
@@ -212,18 +250,21 @@ async function triggerReminders(targetFirmId?: string, targetUserId?: string, is
   }
 
   try {
-    const now = new Date();
-    const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
-    
-    let taskQuery = supabase.from("tasks").select("*, firm_id");
-    if (!isManual) {
-      taskQuery = taskQuery.gt("due_date", now.toISOString()).lt("due_date", nextHour.toISOString());
-    } else {
+    let tasks: any[] = [];
+    if (sendTasksFlag) {
+      let taskQuery = supabase.from("tasks").select("*, firm_id");
       taskQuery = taskQuery.neq("status", "Completed");
+      if (targetFirmId) taskQuery = taskQuery.eq("firm_id", targetFirmId);
+      
+      const { data: qTasks } = await taskQuery;
+      if (qTasks) {
+        tasks = qTasks.filter((t: any) => {
+          if (!t.due_date) return true;
+          const dDateStr = new Date(t.due_date).toISOString().split('T')[0];
+          return dDateStr <= maxLimitDateStr;
+        });
+      }
     }
-    if (targetFirmId) taskQuery = taskQuery.eq("firm_id", targetFirmId);
-    
-    const { data: tasks } = await taskQuery;
 
     if (tasks && tasks.length > 0) {
       for (const t of tasks) {
@@ -238,8 +279,8 @@ async function triggerReminders(targetFirmId?: string, targetUserId?: string, is
          if (assignedUsers) {
            for (const u of assignedUsers) {
              if (!u.emails || u.message_notifications === false) continue;
-             const subject = `Task Reminder: ${t.name}`;
-             const body = `<p>You have a pending task <strong>${t.name}</strong> due on ${new Date(t.due_date).toLocaleDateString()}.</p>`;
+             const subject = `${tagStr}Task Reminder: ${t.name}`;
+             const body = `<p>${options?.isAuto ? "This is an automated background alert. " : ""}You have a pending task <strong>${t.name}</strong> due on ${new Date(t.due_date).toLocaleDateString()}.</p>`;
              await sendAndLogEmail(u.firm_id, u.id, u.emails, subject, body, u.name);
              countTasks++;
            }
@@ -247,17 +288,19 @@ async function triggerReminders(targetFirmId?: string, targetUserId?: string, is
       }
     }
 
-    let eventQuery = supabase.from("events").select("*");
-    if (!isManual) {
-      const todayDate = now.toISOString().split('T')[0];
-      eventQuery = eventQuery.eq("date", todayDate);
-    } else {
-      const todayDate = now.toISOString().split('T')[0];
-      eventQuery = eventQuery.gte("date", todayDate);
+    let events: any[] = [];
+    if (sendEventsFlag) {
+      let eventQuery = supabase.from("events").select("*");
+      eventQuery = eventQuery.gte("date", todayDateStr);
+      if (targetFirmId) eventQuery = eventQuery.eq("firm_id", targetFirmId);
+      const { data: qEvents } = await eventQuery;
+      if (qEvents) {
+        events = qEvents.filter((e: any) => {
+          if (!e.date) return false;
+          return e.date <= maxLimitDateStr;
+        });
+      }
     }
-    if (targetFirmId) eventQuery = eventQuery.eq("firm_id", targetFirmId);
-    const { data: events, error: eventError } = await eventQuery;
-    if (eventError) console.error("Event Query Error:", eventError);
 
     if (events && events.length > 0) {
       for (const e of events) {
@@ -269,8 +312,8 @@ async function triggerReminders(targetFirmId?: string, targetUserId?: string, is
          if (firmStaff) {
            for (const u of firmStaff) {
              if (!u.emails || u.message_notifications === false) continue;
-             const subject = `Upcoming Event: ${e.title}`;
-             const body = `<p>You have an upcoming event <strong>${e.title}</strong> scheduled on ${new Date(e.date).toLocaleDateString()} at ${e.time}.</p>`;
+             const subject = `${tagStr}Upcoming Event: ${e.title}`;
+             const body = `<p>${options?.isAuto ? "This is an automated background alert. " : ""}You have an upcoming event <strong>${e.title}</strong> scheduled on ${new Date(e.date).toLocaleDateString()} at ${e.time || 'N/A'}.</p>`;
              await sendAndLogEmail(u.firm_id, u.id, u.emails, subject, body, u.name);
              countEvents++;
            }
@@ -1309,8 +1352,9 @@ async function startServer() {
     let status = "sent";
     try {
       if (resend) {
+        const fromEmail = process.env.RESEND_FROM_EMAIL || "Firm Notifications <onboarding@resend.dev>";
         await resend.emails.send({
-          from: "Firm Notifications <support@firmmanagerapp.com>",
+          from: fromEmail,
           to: [recipient_email],
           subject: subject,
           html: body
@@ -1390,8 +1434,9 @@ async function startServer() {
     let status = 'sent';
     try {
       if (resend) {
+        const fromEmail = process.env.RESEND_FROM_EMAIL || "Firm Notifications <onboarding@resend.dev>";
         await resend.emails.send({
-          from: "Firm Notifications <support@firmmanagerapp.com>",
+          from: fromEmail,
           to: [emailLog.recipient_email],
           subject: emailLog.subject,
           html: emailLog.body
@@ -1433,8 +1478,14 @@ async function startServer() {
   app.post("/api/emails/trigger-reminders", authenticateToken, async (req, res) => {
     try {
       const user = (req as any).user;
-      const { userId } = req.body;
-      const counts = await triggerReminders(user.firm_id, userId, true);
+      const { userId, timeframe, customDays, sendTasks, sendEvents, isAuto } = req.body;
+      const counts = await triggerReminders(user.firm_id, userId, true, {
+        timeframe,
+        customDays,
+        sendTasks,
+        sendEvents,
+        isAuto
+      });
       res.json({ success: true, counts });
     } catch (err: any) {
       console.error("trigger-reminders error:", err);

@@ -202,146 +202,31 @@ export default function Emails() {
         if (isCorrectDay && isTimeMatched && !alreadyRunToday) {
           console.log(`Automatic Reminder triggering for ${currentDayName} after scheduled time ${autoTime} (Current time: ${currentTimeStr})...`);
           try {
-            const getMaxDateLimit = () => {
-              const limit = new Date();
-              if (autoModeTimeframe === 'week') {
-                limit.setDate(limit.getDate() + 7);
-              } else if (autoModeTimeframe === 'month') {
-                limit.setDate(limit.getDate() + 30);
-              } else if (autoModeTimeframe === 'year') {
-                limit.setDate(limit.getDate() + 365);
-              } else if (autoModeTimeframe === 'custom') {
-                limit.setDate(limit.getDate() + (Number(autoCustomDays) || 14));
-              }
-              return limit;
-            };
+            const res = await fetch('/api/emails/trigger-reminders', {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` 
+              },
+              body: JSON.stringify({
+                sendTasks: true,
+                sendEvents: true,
+                timeframe: autoModeTimeframe,
+                customDays: autoCustomDays,
+                isAuto: true
+              })
+            });
 
-            const maxLimitDate = getMaxDateLimit();
-            const maxLimitDateStr = maxLimitDate.toISOString().split('T')[0];
-            const todayDate = new Date().toISOString().split('T')[0];
-            
-            // Get incomplete tasks
-            const { data: tasks, error: tasksErr } = await supabase
-              .from('tasks')
-              .select('*')
-              .eq('firm_id', user.firm_id)
-              .neq('status', 'Completed');
-              
-            // Get upcoming events
-            const { data: events, error: eventsErr } = await supabase
-              .from('events')
-              .select('*')
-              .eq('firm_id', user.firm_id)
-              .gte('date', todayDate);
-              
-            if (tasksErr || eventsErr) {
-              console.error("Auto dispatch queries failed:", tasksErr, eventsErr);
-              return;
-            }
-            
-            // Filter
-            const filteredTasks = (tasks || []).filter(t => {
-              if (!t.due_date) return true;
-              const tDate = new Date(t.due_date);
-              return tDate <= maxLimitDate;
-            });
-            
-            const filteredEvents = (events || []).filter(e => {
-              if (!e.date) return false;
-              return e.date <= maxLimitDateStr;
-            });
-            
-            let countTasks = 0;
-            let countEvents = 0;
-            const logsToInsert: any[] = [];
-            
-            if (filteredTasks.length > 0 && staff.length > 0) {
-              for (const t of filteredTasks) {
-                if (!t.assigned_to || t.assigned_to.length === 0) continue;
-                for (const u of staff) {
-                  if (!t.assigned_to.includes(u.id)) continue;
-                  if (!u.emails || u.message_notifications === false) continue;
-                  
-                  const subject = `[AUTO] Task Reminder: ${t.name}`;
-                  const bodyContent = `<p>This is an automated background alert. You have a pending task <strong>${t.name}</strong> due on ${new Date(t.due_date).toLocaleDateString()}.</p>`;
-                  const htmlTemplate = `
-                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                      <div style="background-color: #10b981; padding: 20px; text-align: center;">
-                        <span style="color: white; font-weight: bold; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; background-color: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 4px; display: inline-block; margin-bottom: 8px;">AUTOMATED DISPATCHER</span>
-                        <h1 style="color: white; margin: 0; font-size: 20px; letter-spacing: 1px;">Firm Manager Portal</h1>
-                      </div>
-                      <div style="padding: 30px; background-color: #ffffff;">
-                        <h2 style="color: #1a1a1a; margin-top: 0;">Hello ${u.name || "there"},</h2>
-                        <div style="line-height: 1.6; color: #4b5563;">
-                          ${bodyContent}
-                        </div>
-                        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #6b7280; text-align: center;">
-                          <p style="margin: 0;">This is an automated background notification from your Firm Manager App.</p>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                  
-                  logsToInsert.push({
-                    id: Math.random().toString(36).substring(2) + Date.now().toString(36),
-                    firm_id: user.firm_id,
-                    recipient_id: u.id,
-                    recipient_email: u.emails,
-                    subject,
-                    body: htmlTemplate,
-                    status: 'sent',
-                    sent_at: new Date().toISOString()
-                  });
-                  countTasks++;
-                }
+            if (res.ok) {
+              const data = await res.json();
+              const tasksSent = data.counts?.tasks || 0;
+              const eventsSent = data.counts?.events || 0;
+              if (tasksSent > 0 || eventsSent > 0) {
+                toast.success(`🔄 Auto-Dispatch System: Automatically sent due items (${tasksSent} tasks, ${eventsSent} events) for timeframe: ${autoModeTimeframe}!`);
               }
-            }
-            
-            if (filteredEvents.length > 0 && staff.length > 0) {
-              for (const e of filteredEvents) {
-                for (const u of staff) {
-                  if (!u.emails || u.message_notifications === false) continue;
-                  
-                  const subject = `[AUTO] Upcoming Event: ${e.title}`;
-                  const bodyContent = `<p>This is an automated background alert. You have an upcoming event <strong>${e.title}</strong> scheduled on ${new Date(e.date).toLocaleDateString()} at ${e.time || 'N/A'}.</p>`;
-                  const htmlTemplate = `
-                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                      <div style="background-color: #10b981; padding: 20px; text-align: center;">
-                        <span style="color: white; font-weight: bold; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; background-color: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 4px; display: inline-block; margin-bottom: 8px;">AUTOMATED DISPATCHER</span>
-                        <h1 style="color: white; margin: 0; font-size: 20px; letter-spacing: 1px;">Firm Manager Portal</h1>
-                      </div>
-                      <div style="padding: 30px; background-color: #ffffff;">
-                        <h2 style="color: #1a1a1a; margin-top: 0;">Hello ${u.name || "there"},</h2>
-                        <div style="line-height: 1.6; color: #4b5563;">
-                          ${bodyContent}
-                        </div>
-                        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #6b7280; text-align: center;">
-                          <p style="margin: 0;">This is an automated background notification from your Firm Manager App.</p>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                  
-                  logsToInsert.push({
-                    id: Math.random().toString(36).substring(2) + Date.now().toString(36),
-                    firm_id: user.firm_id,
-                    recipient_id: u.id,
-                    recipient_email: u.emails,
-                    subject,
-                    body: htmlTemplate,
-                    status: 'sent',
-                    sent_at: new Date().toISOString()
-                  });
-                  countEvents++;
-                }
-              }
-            }
-            
-            if (logsToInsert.length > 0) {
-              const { error: insertErr } = await supabase.from('email_logs').insert(logsToInsert);
-              if (insertErr) throw insertErr;
-              toast.success(`🔄 Auto-Dispatch System: Automatically mailed due items (${countTasks} tasks, ${countEvents} events) for timeframe: ${autoModeTimeframe}!`);
               fetchData();
+            } else {
+              console.warn("Auto dispatch request completed with non-ok response status");
             }
             
             localStorage.setItem('last_auto_dispatch_date', todayDateStr);
@@ -571,7 +456,9 @@ export default function Emails() {
           body: JSON.stringify({
             userId: staffId || undefined,
             sendTasks,
-            sendEvents
+            sendEvents,
+            timeframe,
+            customDays
           })
         });
         if (res.ok) {
