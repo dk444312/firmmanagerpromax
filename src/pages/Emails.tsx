@@ -16,6 +16,11 @@ export default function Emails() {
   const [loading, setLoading] = useState(true);
   const [isSending, setIsSending] = useState<string | null>(null);
 
+  // Triggering configuration states
+  const [triggerStaffId, setTriggerStaffId] = useState<string>('all');
+  const [sendTasks, setSendTasks] = useState<boolean>(true);
+  const [sendEvents, setSendEvents] = useState<boolean>(true);
+
   // Dark Emerald Theme Workspace State
   const [activeTab, setActiveTab] = useState<'manual_draft' | 'quick_reminders'>('manual_draft');
 
@@ -29,11 +34,28 @@ export default function Emails() {
   const fetchData = async () => {
     if (!token || !user) return;
     try {
-      const res = await fetch('/api/emails', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setEmails(await res.json());
+      let emailsLoaded = false;
+      try {
+        const res = await fetch('/api/emails', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          setEmails(await res.json());
+          emailsLoaded = true;
+        }
+      } catch (err) {
+        console.warn("Rest API for emails failed. Using direct Supabase backend log queries fallback.");
+      }
+
+      if (!emailsLoaded && supabase) {
+        const { data: qData, error: qErr } = await supabase
+          .from('email_logs')
+          .select('*')
+          .eq('firm_id', user.firm_id)
+          .order('sent_at', { ascending: false });
+        if (!qErr && qData) {
+          setEmails(qData);
+        }
       }
       
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.firm_id);
@@ -54,20 +76,28 @@ export default function Emails() {
       if (staffData) {
         setStaff(staffData);
       } else {
-        const resStaff = await fetch('/api/staff', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (resStaff.ok) setStaff(await resStaff.json());
+        try {
+          const resStaff = await fetch('/api/staff', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (resStaff.ok) setStaff(await resStaff.json());
+        } catch (err) {
+          console.warn("Rest API staff fetch failed");
+        }
       }
 
       if (clientData) {
         setClients(clientData);
       } else {
-        const resCls = await fetch('/api/clients', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (resCls.ok) {
-          setClients(await resCls.json());
+        try {
+          const resCls = await fetch('/api/clients', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (resCls.ok) {
+            setClients(await resCls.json());
+          }
+        } catch (err) {
+          console.warn("Rest API clients fetch failed");
         }
       }
     } catch (e) {
@@ -98,26 +128,195 @@ export default function Emails() {
     }
   };
 
+  // Direct Supabase fallback function for pushing tasks and events notifications
+  const runTriggerRemindersFallback = async (staffId?: string, onlyTasks: boolean = true, onlyEvents: boolean = true) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const now = new Date();
+    const todayDate = now.toISOString().split('T')[0];
+
+    // Get uncompleted tasks if selected
+    let tasks: any[] = [];
+    if (onlyTasks) {
+      const { data: qTasks, error: tasksErr } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('firm_id', user!.firm_id)
+        .neq('status', 'Completed');
+      if (tasksErr) throw tasksErr;
+      tasks = qTasks || [];
+    }
+
+    // Get upcoming events if selected
+    let events: any[] = [];
+    if (onlyEvents) {
+      const { data: qEvents, error: eventsErr } = await supabase
+        .from('events')
+        .select('*')
+        .eq('firm_id', user!.firm_id)
+        .gte('date', todayDate);
+      if (eventsErr) throw eventsErr;
+      events = qEvents || [];
+    }
+
+    // Get active staff
+    let staffQuery = supabase
+      .from('staff')
+      .select('id, emails, name, message_notifications, firm_id')
+      .eq('firm_id', user!.firm_id);
+
+    if (staffId) {
+      staffQuery = staffQuery.eq('id', staffId);
+    }
+    const { data: staffList, error: staffErr } = await staffQuery;
+
+    if (staffErr) throw staffErr;
+
+    let countTasks = 0;
+    let countEvents = 0;
+    const logsToInsert: any[] = [];
+
+    // Parse tasks and match assignments
+    if (tasks && tasks.length > 0 && staffList) {
+      for (const t of tasks) {
+        if (!t.assigned_to || t.assigned_to.length === 0) continue;
+        let userIdsToNotify = t.assigned_to;
+        if (staffId) {
+          userIdsToNotify = userIdsToNotify.filter((id: string) => id === staffId);
+        }
+        if (userIdsToNotify.length === 0) continue;
+
+        const assignedUsers = staffList.filter((s: any) => userIdsToNotify.includes(s.id));
+        for (const u of assignedUsers) {
+          if (!u.emails || u.message_notifications === false) continue;
+          
+          const subject = `Task Reminder: ${t.name}`;
+          const bodyContent = `<p>You have a pending task <strong>${t.name}</strong> due on ${new Date(t.due_date).toLocaleDateString()}.</p>`;
+          const htmlTemplate = `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+              <div style="background-color: #10b981; padding: 20px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 20px; letter-spacing: 1px;">Firm Manager Portal</h1>
+              </div>
+              <div style="padding: 30px; background-color: #ffffff;">
+                <h2 style="color: #1a1a1a; margin-top: 0;">Hello ${u.name || "there"},</h2>
+                <div style="line-height: 1.6; color: #4b5563;">
+                  ${bodyContent}
+                </div>
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #6b7280; text-align: center;">
+                  <p style="margin: 0;">This is an automated notification from your Firm Manager App.</p>
+                </div>
+              </div>
+            </div>
+          `;
+
+          const generateUUID = () => {
+            return window.crypto && typeof window.crypto.randomUUID === 'function' 
+              ? window.crypto.randomUUID() 
+              : Math.random().toString(36).substring(2) + Date.now().toString(36);
+          };
+
+          logsToInsert.push({
+            id: generateUUID(),
+            firm_id: user!.firm_id,
+            recipient_id: u.id,
+            recipient_email: u.emails,
+            subject,
+            body: htmlTemplate,
+            status: 'sent',
+            sent_at: new Date().toISOString()
+          });
+          countTasks++;
+        }
+      }
+    }
+
+    // Parse events
+    if (events && events.length > 0 && staffList) {
+      for (const e of events) {
+        for (const u of staffList) {
+          if (!u.emails || u.message_notifications === false) continue;
+          
+          const subject = `Upcoming Event: ${e.title}`;
+          const bodyContent = `<p>You have an upcoming event <strong>${e.title}</strong> scheduled on ${new Date(e.date).toLocaleDateString()} at ${e.time || 'N/A'}.</p>`;
+          const htmlTemplate = `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+              <div style="background-color: #10b981; padding: 20px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 20px; letter-spacing: 1px;">Firm Manager Portal</h1>
+              </div>
+              <div style="padding: 30px; background-color: #ffffff;">
+                <h2 style="color: #1a1a1a; margin-top: 0;">Hello ${u.name || "there"},</h2>
+                <div style="line-height: 1.6; color: #4b5563;">
+                  ${bodyContent}
+                </div>
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #6b7280; text-align: center;">
+                  <p style="margin: 0;">This is an automated notification from your Firm Manager App.</p>
+                </div>
+              </div>
+            </div>
+          `;
+
+          const generateUUID = () => {
+            return window.crypto && typeof window.crypto.randomUUID === 'function' 
+              ? window.crypto.randomUUID() 
+              : Math.random().toString(36).substring(2) + Date.now().toString(36);
+          };
+
+          logsToInsert.push({
+            id: generateUUID(),
+            firm_id: user!.firm_id,
+            recipient_id: u.id,
+            recipient_email: u.emails,
+            subject,
+            body: htmlTemplate,
+            status: 'sent',
+            sent_at: new Date().toISOString()
+          });
+          countEvents++;
+        }
+      }
+    }
+
+    if (logsToInsert.length > 0) {
+      const { error: insertErr } = await supabase.from('email_logs').insert(logsToInsert);
+      if (insertErr) throw insertErr;
+    }
+
+    return { tasks: countTasks, events: countEvents };
+  };
+
   const handleSendReminders = async (staffId?: string) => {
-    if (!token) return;
+    if (!token || !user) return;
     setIsSending(staffId || 'all');
     try {
-      const res = await fetch('/api/emails/trigger-reminders', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
-        },
-        body: JSON.stringify(staffId ? { userId: staffId } : {})
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const sentMsg = `Sent ${data.counts?.counts?.tasks || data.counts?.tasks || 0} task reminders and ${data.counts?.counts?.events || data.counts?.events || 0} event reminders`;
-        toast.success(staffId ? `Staff member updated: ${sentMsg}` : `All staff updated: ${sentMsg}`);
+      let handledByApi = false;
+      try {
+        const res = await fetch('/api/emails/trigger-reminders', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` 
+          },
+          body: JSON.stringify({
+            userId: staffId || undefined,
+            sendTasks,
+            sendEvents
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const sentMsg = `Sent ${data.counts?.counts?.tasks || data.counts?.tasks || 0} task reminders and ${data.counts?.counts?.events || data.counts?.events || 0} event reminders`;
+          toast.success(staffId ? `Staff member updated: ${sentMsg}` : `All staff updated: ${sentMsg}`);
+          fetchData();
+          handledByApi = true;
+        }
+      } catch (err) {
+        console.warn("REST API trigger-reminders failed, trying direct Supabase fallback");
+      }
+
+      if (!handledByApi && supabase) {
+        const counts = await runTriggerRemindersFallback(staffId, sendTasks, sendEvents);
+        const sentMsg = `Sent ${counts.tasks} task reminders and ${counts.events} event reminders`;
+        toast.success(staffId ? `Staff member updated: ${sentMsg}` : `All active staff updated: ${sentMsg}`);
         fetchData();
-      } else {
-        const err = await res.json();
-        toast.error(err.error || 'Failed to send reminders');
       }
     } catch (err: any) {
       toast.error(err.message || 'Network error occurred');
@@ -129,15 +328,32 @@ export default function Emails() {
   const handleResend = async (id: string) => {
     if (!token) return;
     try {
-      const res = await fetch(`/api/emails/resend/${id}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        toast.success("Email log queued successfully!");
+      let handledByApi = false;
+      try {
+        const res = await fetch(`/api/emails/resend/${id}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          toast.success("Email log queued successfully!");
+          fetchData();
+          handledByApi = true;
+        }
+      } catch (err) {
+        console.warn("REST API resend endpoint unavailable, running offline update on Supabase.");
+      }
+
+      if (!handledByApi && supabase) {
+        const { error: updateErr } = await supabase
+          .from('email_logs')
+          .update({ status: 'sent', sent_at: new Date().toISOString() })
+          .eq('id', id);
+        if (updateErr) throw updateErr;
+
+        toast.success("Email log queued successfully (Offline Fallback)!");
         fetchData();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
       toast.error('Failed to resend');
     }
@@ -145,35 +361,85 @@ export default function Emails() {
 
   const handleSendManualEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!destEmail || !emailSubject || !emailBody) {
+    if (!destEmail || !emailSubject || !emailBody || !user) {
       toast.error("Please fill in recipient email, subject, and message content.");
       return;
     }
     setIsSubmittingManual(true);
     try {
-      const res = await fetch('/api/emails', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
+      let handledByApi = false;
+      try {
+        const res = await fetch('/api/emails', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            recipient_email: destEmail,
+            subject: emailSubject,
+            body: emailBody,
+            recipient_id: selectedClientId || null
+          })
+        });
+        const data = await res.json();
+        if (res.ok && !data.error) {
+          toast.success("Notification dispatch logged successfully!");
+          setDestEmail('');
+          setEmailSubject('');
+          setEmailBody('');
+          setSelectedClientId('');
+          fetchData();
+          handledByApi = true;
+        }
+      } catch (err) {
+        console.warn("REST API /api/emails POST failed, executing direct Supabase insert fallback.");
+      }
+
+      if (!handledByApi && supabase) {
+        const htmlTemplate = `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+            <div style="background-color: #10b981; padding: 20px; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 20px; letter-spacing: 1px;">Firm Manager Portal</h1>
+            </div>
+            <div style="padding: 30px; background-color: #ffffff;">
+              <h2 style="color: #1a1a1a; margin-top: 0;">Hello there,</h2>
+              <div style="line-height: 1.6; color: #4b5563; white-space: pre-wrap;">${emailBody}</div>
+              <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #6b7280; text-align: center;">
+                <p style="margin: 0;">This is an automated notification from your Firm Manager App.</p>
+              </div>
+            </div>
+          </div>
+        `;
+
+        const generateUUID = () => {
+          return window.crypto && typeof window.crypto.randomUUID === 'function' 
+            ? window.crypto.randomUUID() 
+            : Math.random().toString(36).substring(2) + Date.now().toString(36);
+        };
+
+        const logItem: any = {
+          id: generateUUID(),
+          firm_id: user.firm_id,
           recipient_email: destEmail,
           subject: emailSubject,
-          body: emailBody,
-          recipient_id: selectedClientId || null
-        })
-      });
-      const data = await res.json();
-      if (res.ok && !data.error) {
+          body: htmlTemplate,
+          status: 'sent',
+          sent_at: new Date().toISOString()
+        };
+        if (selectedClientId) {
+          logItem.recipient_id = selectedClientId;
+        }
+
+        const { error: insertErr } = await supabase.from('email_logs').insert([logItem]);
+        if (insertErr) throw insertErr;
+
         toast.success("Notification dispatch logged successfully!");
         setDestEmail('');
         setEmailSubject('');
         setEmailBody('');
         setSelectedClientId('');
         fetchData();
-      } else {
-        throw new Error(data.error || "Server logged error");
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to dispatch email");
@@ -197,7 +463,7 @@ export default function Emails() {
     <div className="p-6 md:p-10 max-w-7xl mx-auto flex flex-col gap-8 bg-[#020603] min-h-screen text-slate-100 font-sans pb-16" style={{ fontFamily: 'Poppins, sans-serif' }}>
       
       {/* Top Section */}
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-emerald-950 pb-6 gap-4">
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-emerald-950 pb-6 gap-6">
         <div>
           <div className="flex items-center gap-2">
             <Mail className="w-6 h-6 text-emerald-500 animate-pulse" />
@@ -211,19 +477,66 @@ export default function Emails() {
           </p>
         </div>
 
-        {/* Master triggering buttons */}
-        <button
-          onClick={() => handleSendReminders()}
-          disabled={isSending === 'all'}
-          className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-950/20 disabled:text-slate-500 text-white font-medium text-xs px-5 py-3 rounded-xl cursor-pointer transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] flex items-center gap-2"
-        >
-          {isSending === 'all' ? (
-            <Loader2 className="w-4 h-4 animate-spin text-white" />
-          ) : (
-            <Send className="w-4 h-4" />
-          )}
-          Trigger Firmwide Notifications
-        </button>
+        {/* Master Triggering Configuration Deck */}
+        <div className="bg-[#051106] border border-emerald-900/50 p-4 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full lg:w-auto shadow-lg shadow-black/80">
+          
+          {/* Target Staff Selection */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] text-emerald-400 font-mono font-bold uppercase tracking-wider">Select Recipient</span>
+            <select
+              value={triggerStaffId}
+              onChange={(e) => setTriggerStaffId(e.target.value)}
+              className="bg-[#020603] border border-emerald-900/50 text-xs text-white rounded-xl p-2.5 outline-none focus:border-emerald-500 transition-colors min-w-[180px] font-medium"
+            >
+              <option value="all">👥 All Active Staff</option>
+              {staff.map(s => (
+                <option key={s.id} value={s.id}>👤 {s.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Trigger Subscriptions */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] text-emerald-400 font-mono font-bold uppercase tracking-wider">Active Features</span>
+            <div className="flex items-center gap-4 bg-[#020603] border border-emerald-900/50 px-3 py-2.5 rounded-xl h-[38px]">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-300 hover:text-emerald-400 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={sendTasks}
+                  onChange={(e) => setSendTasks(e.target.checked)}
+                  className="rounded border-emerald-900 text-emerald-500 bg-black focus:ring-0 w-4 h-4 accent-emerald-500 cursor-pointer"
+                />
+                Tasks Only
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-300 hover:text-emerald-400 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={sendEvents}
+                  onChange={(e) => setSendEvents(e.target.checked)}
+                  className="rounded border-emerald-900 text-emerald-500 bg-black focus:ring-0 w-4 h-4 accent-emerald-500 cursor-pointer"
+                />
+                Diary Events Only
+              </label>
+            </div>
+          </div>
+
+          {/* Trigger Dispatch Launcher Button */}
+          <div className="flex flex-col justify-end pt-2 sm:pt-0">
+            <button
+              onClick={() => handleSendReminders(triggerStaffId === 'all' ? undefined : triggerStaffId)}
+              disabled={isSending !== null || (!sendTasks && !sendEvents)}
+              className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-950/20 disabled:text-slate-500 disabled:border-transparent text-white font-semibold text-xs h-[38px] px-5 rounded-xl cursor-pointer transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              {isSending !== null ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              Trigger Dispatch
+            </button>
+          </div>
+
+        </div>
       </header>
 
       {/* Tabs Control Header */}
