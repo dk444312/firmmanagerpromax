@@ -1,0 +1,50 @@
+# Render Blueprint Specification for FirmManager
+# To deploy, go to Dashboard -> Blueprints -> New Blueprint Instance on Render.
+
+services:
+  # 1. Frontend Static Site (React / Vite SPA)
+  - type: web
+    name: firmmanager-frontend
+    env: static
+    buildCommand: npm run build
+    publishPath: dist
+    headers:
+      - path: /*
+        headers:
+          - key: Cache-Control
+            value: no-cache
+    routes:
+      # Rewrites all requests to index.html for React Router (Single Page App routing fallback)
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_SUPABASE_URL
+        value: "https://uiymwwlamagbylxqgwvj.supabase.co" # Replace with your Supabase Project URL if customized
+      - key: VITE_SUPABASE_ANON_KEY
+        value: "sb_publishable_3F1iWKvxKjTzFkYIyzrgpg_GuFLiOIX" # Replace with your Supabase Anon Public Key if customized
+      - key: VITE_API_URL
+        value: "" # If deploying the backend service below, set this to the backend web service's onrender.com URL
+
+  # 2. Backend Web Service (Express Node.js Server - Optional)
+  # Uncomment this service if you want to host the Express server to support email reminders and background triggers.
+  # - type: web
+  #   name: firmmanager-backend
+  #   env: node
+  #   buildCommand: npm install
+  #   startCommand: npx tsx server.ts
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: PORT
+  #       value: 10000
+  #     - key: SUPABASE_URL
+  #       sync: false # Set in the Render dashboard secrets
+  #     - key: SUPABASE_SERVICE_ROLE_KEY
+  #       sync: false # Set in the Render dashboard secrets
+  #     - key: GEMINI_API_KEY
+  #       sync: false # Set in the Render dashboard secrets
+  #     - key: RESEND_API_KEY
+  #       sync: false # Set in the Render dashboard secrets
+  #     - key: RESEND_FROM_EMAIL
+  #       sync: false # Set in the Render dashboard secrets

@@ -379,7 +379,7 @@ export default function Emails() {
             recipient_email: u.emails,
             subject,
             body: htmlTemplate,
-            status: 'sent',
+            status: 'pending',
             sent_at: new Date().toISOString()
           });
           countTasks++;
@@ -425,7 +425,7 @@ export default function Emails() {
             recipient_email: u.emails,
             subject,
             body: htmlTemplate,
-            status: 'sent',
+            status: 'pending',
             sent_at: new Date().toISOString()
           });
           countEvents++;
@@ -506,7 +506,7 @@ export default function Emails() {
       if (!handledByApi && supabase) {
         const { error: updateErr } = await supabase
           .from('email_logs')
-          .update({ status: 'sent', sent_at: new Date().toISOString() })
+          .update({ status: 'pending', sent_at: new Date().toISOString() })
           .eq('id', id);
         if (updateErr) throw updateErr;
 
@@ -584,7 +584,7 @@ export default function Emails() {
           recipient_email: destEmail,
           subject: emailSubject,
           body: htmlTemplate,
-          status: 'sent',
+          status: 'pending',
           sent_at: new Date().toISOString()
         };
         if (selectedClientId) {

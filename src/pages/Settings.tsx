@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Settings as SettingsIcon, Upload, Edit3, Key } from 'lucide-react';
+import { Settings as SettingsIcon, Upload, Edit3, Key, Mail, Lock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import bcrypt from 'bcryptjs';
 
@@ -14,6 +14,11 @@ export default function Settings() {
   
   const [password, setPassword] = useState('');
   const [passMsg, setPassMsg] = useState('');
+
+  const [resendApiKey, setResendApiKey] = useState('');
+  const [resendFromEmail, setResendFromEmail] = useState('');
+  const [emailSettingsMsg, setEmailSettingsMsg] = useState('');
+  const [isSavingEmailSettings, setIsSavingEmailSettings] = useState(false);
 
   const [uiMap, setUiMap] = useState<Record<string, string>>({
     Dashboard: 'Dashboard',
@@ -29,6 +34,26 @@ export default function Settings() {
     // initialize from global state if present
     setUiMap((prev) => ({ ...prev, ...uiConfig }));
   }, [uiConfig]);
+
+  useEffect(() => {
+    if (user && user.role === 'Managing Partner' && supabase) {
+      (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('firms')
+            .select('resend_api_key, resend_from_email')
+            .eq('id', user.firm_id)
+            .single();
+          if (data && !error) {
+            setResendApiKey(data.resend_api_key || '');
+            setResendFromEmail(data.resend_from_email || '');
+          }
+        } catch (err) {
+          console.error("Failed to fetch email credentials:", err);
+        }
+      })();
+    }
+  }, [user]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -73,8 +98,8 @@ export default function Settings() {
   const handleSaveConfig = async () => {
     if (!token || !supabase || !user) return;
     try {
-      if (user.role !== 'admin') {
-         setUiConfigMsg('Only admins can change UI config.');
+      if (user.role !== 'Managing Partner') {
+         setUiConfigMsg('Only Managing Partners can change UI config.');
          return;
       }
       const { error } = await supabase.from('firms').update({ ui_config: uiMap }).eq('id', user.firm_id);
@@ -87,6 +112,35 @@ export default function Settings() {
       }
     } catch {
       setUiConfigMsg('Error saving configuration.');
+    }
+  };
+
+  const handleSaveEmailSettings = async () => {
+    if (!token || !supabase || !user) return;
+    setIsSavingEmailSettings(true);
+    try {
+      if (user.role !== 'Managing Partner') {
+        setEmailSettingsMsg('Only Managing Partners can update email configurations.');
+        return;
+      }
+      const { error } = await supabase
+        .from('firms')
+        .update({ 
+          resend_api_key: resendApiKey, 
+          resend_from_email: resendFromEmail 
+        })
+        .eq('id', user.firm_id);
+      
+      if (!error) {
+        setEmailSettingsMsg('Email settings saved successfully.');
+        setTimeout(() => setEmailSettingsMsg(''), 3000);
+      } else {
+        setEmailSettingsMsg(`Failed to save settings: ${error.message}`);
+      }
+    } catch {
+      setEmailSettingsMsg('Error saving email credentials.');
+    } finally {
+      setIsSavingEmailSettings(false);
     }
   };
 
@@ -206,33 +260,78 @@ export default function Settings() {
       </div>
 
       {user?.role === 'Managing Partner' && (
-        <div className="bg-[#151619] border border-white/10 rounded-2xl p-8 mb-8">
-          <h2 className="text-xl font-medium text-white mb-6 flex items-center gap-2">
-            <Edit3 className="w-5 h-5 text-emerald-400" /> Platform Customization
-          </h2>
-          <p className="text-slate-400 text-sm mb-6">Customize menu labels to match your firm's terminology.</p>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            {Object.keys(uiMap).map((key) => (
-              <div key={key}>
-                <label className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wide">{key}</label>
+        <>
+          <div className="bg-[#151619] border border-white/10 rounded-2xl p-8 mb-8">
+            <h2 className="text-xl font-medium text-white mb-6 flex items-center gap-2">
+              <Mail className="w-5 h-5 text-emerald-400" /> Resend Email Dispatch Credentials
+            </h2>
+            <p className="text-slate-400 text-sm mb-6">
+              Configure your firm's Resend API Key and verified sender email. These are stored securely in your private database and are used to send real automated and manual emails directly from your static site using our serverless database integration.
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wide">Resend API Key</label>
                 <input
-                  type="text"
-                  value={uiMap[key]}
-                  onChange={e => setUiMap({ ...uiMap, [key]: e.target.value })}
+                  type="password"
+                  value={resendApiKey}
+                  onChange={e => setResendApiKey(e.target.value)}
+                  placeholder="re_..."
+                  className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white focus:outline-none focus:border-emerald-500 transition-colors text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wide">Sender Email Address</label>
+                <input
+                  type="email"
+                  value={resendFromEmail}
+                  onChange={e => setResendFromEmail(e.target.value)}
+                  placeholder="onboarding@resend.dev"
                   className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white focus:outline-none focus:border-emerald-500 transition-colors text-sm"
                 />
               </div>
-            ))}
+            </div>
+
+            <div className="pt-6 border-t border-white/10 flex items-center justify-between">
+              {emailSettingsMsg ? <span className="text-sm text-emerald-400">{emailSettingsMsg}</span> : <span />}
+              <button 
+                onClick={handleSaveEmailSettings} 
+                disabled={isSavingEmailSettings}
+                className="bg-[#10b981] hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-medium shadow-lg transition-colors text-sm disabled:opacity-50"
+              >
+                {isSavingEmailSettings ? 'Saving...' : 'Save Email Settings'}
+              </button>
+            </div>
           </div>
 
-          <div className="pt-6 border-t border-white/10 flex items-center justify-between">
-            {uiConfigMsg ? <span className="text-sm text-emerald-400">{uiConfigMsg}</span> : <span />}
-            <button onClick={handleSaveConfig} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-medium shadow-lg transition-colors text-sm">
-              Save Customization
-            </button>
+          <div className="bg-[#151619] border border-white/10 rounded-2xl p-8 mb-8">
+            <h2 className="text-xl font-medium text-white mb-6 flex items-center gap-2">
+              <Edit3 className="w-5 h-5 text-emerald-400" /> Platform Customization
+            </h2>
+            <p className="text-slate-400 text-sm mb-6">Customize menu labels to match your firm's terminology.</p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              {Object.keys(uiMap).map((key) => (
+                <div key={key}>
+                  <label className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wide">{key}</label>
+                  <input
+                    type="text"
+                    value={uiMap[key]}
+                    onChange={e => setUiMap({ ...uiMap, [key]: e.target.value })}
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded py-2 px-3 text-white focus:outline-none focus:border-emerald-500 transition-colors text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-6 border-t border-white/10 flex items-center justify-between">
+              {uiConfigMsg ? <span className="text-sm text-emerald-400">{uiConfigMsg}</span> : <span />}
+              <button onClick={handleSaveConfig} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-medium shadow-lg transition-colors text-sm">
+                Save Customization
+              </button>
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

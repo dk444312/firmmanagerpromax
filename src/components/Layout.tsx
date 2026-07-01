@@ -173,6 +173,7 @@ export default function Layout() {
     { name: 'ATLAS', path: '/atlas', icon: Sparkles, id: 'atlas', always: true, comingSoon: true },
     { name: 'Admin Matrix', path: '/admin', icon: ShieldAlert, id: 'admin', always: false },
     { name: 'Messages', path: '/messages', icon: MessageSquare, id: 'messages', always: true },
+    { name: 'Sent Emails', path: '/emails', icon: Mail, id: 'emails', always: true },
     { name: 'Settings', path: '/settings', icon: Settings, id: 'settings', always: true },
   ];
 

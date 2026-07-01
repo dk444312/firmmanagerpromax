@@ -188,3 +188,85 @@ CREATE POLICY "Allow public select" ON public.email_logs FOR SELECT USING (true)
 CREATE POLICY "Allow public insert" ON public.email_logs FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update" ON public.email_logs FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete" ON public.email_logs FOR DELETE USING (true);
+
+-- -----------------------------------------------------------------
+-- SECURE SERVERLESS EMAIL DISPATCH ENGINE FOR STATIC DEPLOYMENTS
+-- -----------------------------------------------------------------
+
+-- 1. Add secret configuration fields to the private firms table
+ALTER TABLE public.firms ADD COLUMN IF NOT EXISTS resend_api_key TEXT;
+ALTER TABLE public.firms ADD COLUMN IF NOT EXISTS resend_from_email TEXT;
+
+-- 2. Enable the required HTTP calling extension in Supabase
+CREATE EXTENSION IF NOT EXISTS http WITH SCHEMA extensions;
+
+-- 3. Create the automated database trigger function to dispatch emails via Resend's REST API
+CREATE OR REPLACE FUNCTION public.send_email_via_resend()
+RETURNS trigger AS $$
+DECLARE
+  resend_key text;
+  from_email text;
+  payload json;
+  response_status integer;
+  response_body text;
+BEGIN
+  -- Grab credentials stored in the sender firm's secure config
+  SELECT resend_api_key, resend_from_email INTO resend_key, from_email 
+  FROM public.firms 
+  WHERE id = NEW.firm_id;
+
+  -- Ensure credentials are set; if not, flag as configuration error
+  IF resend_key IS NULL OR resend_key = '' THEN
+    NEW.status := 'failed_missing_api_key';
+    RETURN NEW;
+  END IF;
+
+  -- Default to Resend onboarding domain if custom email is not yet configured
+  IF from_email IS NULL OR from_email = '' THEN
+    from_email := 'onboarding@resend.dev';
+  END IF;
+
+  -- Format the standard Resend JSON request body
+  payload := json_build_object(
+    'from', from_email,
+    'to', json_build_array(NEW.recipient_email),
+    'subject', NEW.subject,
+    'html', NEW.body
+  );
+
+  -- Perform the secure, out-of-band HTTP request directly from Supabase
+  BEGIN
+    SELECT status, content INTO response_status, response_body 
+    FROM extensions.http((
+      'POST',
+      'https://api.resend.com/emails',
+      ARRAY[
+        extensions.http_header('Authorization', 'Bearer ' || resend_key),
+        extensions.http_header('Content-Type', 'application/json')
+      ],
+      'application/json',
+      payload::text
+    )::extensions.http_request);
+
+    IF response_status >= 200 AND response_status < 300 THEN
+      NEW.status := 'sent';
+      NEW.sent_at := now();
+    ELSE
+      NEW.status := 'failed_api_error';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    NEW.status := 'failed_exception';
+  END;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 4. Establish the trigger to intercept 'pending' logs on insert or update and dispatch them
+DROP TRIGGER IF EXISTS trigger_send_email_on_log ON public.email_logs;
+CREATE TRIGGER trigger_send_email_on_log
+  BEFORE INSERT OR UPDATE ON public.email_logs
+  FOR EACH ROW
+  WHEN (NEW.status = 'pending')
+  EXECUTE FUNCTION public.send_email_via_resend();
+
