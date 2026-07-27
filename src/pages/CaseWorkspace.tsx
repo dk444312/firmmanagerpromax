@@ -55,7 +55,7 @@ export default function CaseWorkspace() {
               <div key={c.id} className="flex items-center justify-between bg-[#1a1c20] p-4 rounded-xl border border-white/5 hover:border-emerald-500/30 transition-colors">
                 <div>
                   <h3 className="text-white font-medium mb-1">{c.title}</h3>
-                  <div className="text-xs text-slate-500">{c.case_number || 'N/A'} • {c.stage || 'Pre-trial'}</div>
+                  <div className="text-xs text-slate-500">{c.case_number || 'N/A'} • {c.stage || 'Client Consultation'}</div>
                 </div>
                 <button 
                   onClick={() => navigate(`/cases/${c.id}`)}

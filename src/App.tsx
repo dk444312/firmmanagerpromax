@@ -34,6 +34,10 @@ import Messages from './pages/Messages';
 import Drafting from './pages/Drafting';
 import Atlas from './pages/Atlas';
 
+import TimeRecording from './pages/TimeRecording';
+import Reports from './pages/Reports';
+import AuditTrail from './pages/AuditTrail';
+
 function ProtectedRoute({ children, reqMenu }: { children: React.ReactNode, reqMenu?: string }) {
   const { user, loading } = useAuth();
   
@@ -83,6 +87,11 @@ export default function App() {
             <Route path="/emails" element={<ProtectedRoute><Emails /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            
+            <Route path="/time-recording" element={<ProtectedRoute><TimeRecording /></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+            <Route path="/audit-trail" element={<ProtectedRoute><AuditTrail /></ProtectedRoute>} />
+
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>

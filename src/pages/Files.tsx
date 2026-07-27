@@ -75,9 +75,52 @@ export default function Files() {
       return;
     }
 
+    // Auto-generate standardized filename based on User Goal:
+    // YYYY-MM-DD_Category_Claimant_v_Defendant.ext
+    const originalName = uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`;
+    let finalFilename = newFileName || originalName;
+    
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const ext = originalName.includes('.') ? originalName.substring(originalName.lastIndexOf('.')) : '';
+      const cleanStr = (s: string) => (s || '').replace(/[^a-zA-Z0-9]/g, '');
+
+      let claimant = '';
+      let defendant = '';
+
+      if (fileCaseId) {
+        const { data: caseObj } = await supabase
+          .from('cases')
+          .select('claimant, defendant')
+          .eq('id', fileCaseId)
+          .single();
+        if (caseObj) {
+          claimant = cleanStr(caseObj.claimant);
+          defendant = cleanStr(caseObj.defendant);
+        }
+      }
+
+      const cleanCategory = newFileName ? cleanStr(newFileName) : 'Document';
+      let formattedName = `${todayStr}_${cleanCategory}`;
+      if (claimant && defendant) {
+        formattedName += `_${claimant}_v_${defendant}`;
+      } else if (claimant) {
+        formattedName += `_${claimant}`;
+      } else {
+        const baseName = originalName.includes('.') 
+          ? originalName.substring(0, originalName.lastIndexOf('.')) 
+          : originalName;
+        formattedName += `_${cleanStr(baseName)}`;
+      }
+      
+      finalFilename = `${formattedName}${ext}`;
+    } catch (err) {
+      console.error("Auto naming failed in Files.tsx, falling back", err);
+    }
+
     let fileUrl = '#';
     if (uploadFileObj) {
-      const fileName = `${Date.now()}-${uploadFileObj.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const fileName = `${Date.now()}-${finalFilename.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
       const { data, error } = await supabase.storage.from('files').upload(fileName, uploadFileObj);
       if (!error && data) {
         const { data: { publicUrl } } = supabase.storage.from('files').getPublicUrl(fileName);
@@ -86,7 +129,7 @@ export default function Files() {
     }
 
     const { data } = await supabase.from('files').insert([{ 
-      filename: newFileName || (uploadFileObj ? uploadFileObj.name : `Document-${Date.now()}.pdf`), 
+      filename: finalFilename, 
       file_url: fileUrl, 
       folder_id: selectedFolder,
       case_id: fileCaseId || null,

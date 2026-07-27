@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { LayoutDashboard, Briefcase, Calendar, FolderOpen, ShieldAlert, LogOut, ChevronDown, ChevronRight, CheckSquare, Settings, Users, Bell, MessageSquare, Mail, FileText, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Calendar, FolderOpen, ShieldAlert, LogOut, ChevronDown, ChevronRight, CheckSquare, Settings, Users, Bell, MessageSquare, Mail, FileText, Sparkles, Clock, BarChart3, ShieldCheck, Search } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import WelcomeTour from './WelcomeTour';
@@ -9,6 +9,7 @@ import WelcomeTour from './WelcomeTour';
 export default function Layout() {
   const { user, logout, uiConfig, token } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     diary: true,
     files: true,
@@ -20,6 +21,97 @@ export default function Layout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [showTour, setShowTour] = useState(false);
+
+  // Universal Global Search state
+  const [globalQuery, setGlobalQuery] = useState('');
+  const [globalResults, setGlobalResults] = useState<any>(null);
+  const [searchingGlobal, setSearchingGlobal] = useState(false);
+  const [showGlobalResults, setShowGlobalResults] = useState(false);
+
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      const isInput = active && (
+        active.tagName === 'INPUT' || 
+        active.tagName === 'TEXTAREA' || 
+        (active as HTMLElement).isContentEditable
+      );
+
+      // Ctrl + K or Cmd + K -> Global Search (always overrides)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        setShowGlobalResults(true);
+        return;
+      }
+
+      // Escape to close search / blur
+      if (e.key === 'Escape') {
+        if (active === searchInputRef.current) {
+          searchInputRef.current?.blur();
+        }
+        setShowGlobalResults(false);
+        return;
+      }
+
+      // If user is typing in an input, do not trigger single-key shortcuts
+      if (isInput) return;
+
+      // F key -> Global Search Focus
+      if (e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        setShowGlobalResults(true);
+        return;
+      }
+
+      // N key -> New Case
+      if (e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        navigate('/cases?action=new');
+        return;
+      }
+
+      // C key -> New Client
+      if (e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        navigate('/clients?action=new');
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!globalQuery.trim()) {
+      setGlobalResults(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setSearchingGlobal(true);
+        const res = await fetch(`/api/universal-search?q=${encodeURIComponent(globalQuery)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const payload = await res.json();
+          setGlobalResults(payload);
+        }
+      } catch (err) {
+        console.error("Global search fetch error:", err);
+      } finally {
+        setSearchingGlobal(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [globalQuery, token]);
+
 
   useEffect(() => {
     // Check if the user has completed the major update tour
@@ -173,6 +265,9 @@ export default function Layout() {
     { name: 'ATLAS', path: '/atlas', icon: Sparkles, id: 'atlas', always: true, comingSoon: true },
     { name: 'Admin Matrix', path: '/admin', icon: ShieldAlert, id: 'admin', always: false },
     { name: 'Messages', path: '/messages', icon: MessageSquare, id: 'messages', always: true },
+    { name: 'Time Recording', path: '/time-recording', icon: Clock, id: 'time-recording', always: true },
+    { name: 'Reports & Stats', path: '/reports', icon: BarChart3, id: 'reports', always: true },
+    { name: 'Audit Trail', path: '/audit-trail', icon: ShieldCheck, id: 'audit-trail', always: true },
     { name: 'Sent Emails', path: '/emails', icon: Mail, id: 'emails', always: true },
     { name: 'Settings', path: '/settings', icon: Settings, id: 'settings', always: true },
   ];
@@ -280,11 +375,197 @@ export default function Layout() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col bg-[#0f0f0f] relative overflow-hidden">
         {/* Top Header */}
-        <header className="h-16 flex-shrink-0 border-b border-white/5 bg-[#151619] flex items-center justify-end px-8 z-40 shadow-sm gap-4">
-          <NavLink 
-            to="/messages"
-            className="relative p-2 rounded-full border border-white/5 bg-[#1a1c20] text-slate-400 hover:text-emerald-500 hover:bg-[#26282d] transition-colors shadow-sm"
-          >
+        <header className="h-16 flex-shrink-0 border-b border-white/5 bg-[#151619] flex items-center justify-between px-8 z-40 shadow-sm gap-4">
+          
+          {/* Universal Global Search Input */}
+          <div className="relative w-full max-w-md hidden md:block">
+            <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-500" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search clients, matters, documents, hearings, notes..."
+                value={globalQuery}
+                onChange={(e) => {
+                  setGlobalQuery(e.target.value);
+                  setShowGlobalResults(true);
+                }}
+                onFocus={() => setShowGlobalResults(true)}
+                className="w-full bg-[#0a0a0a] border border-white/5 hover:border-white/10 focus:border-emerald-500 focus:bg-black rounded-xl py-2 pl-10 pr-4 text-xs text-white placeholder-slate-500 focus:outline-none transition-all"
+              />
+              {globalQuery && (
+                <button 
+                  onClick={() => {
+                    setGlobalQuery('');
+                    setGlobalResults(null);
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs font-semibold"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Global Results Dropdown Panel */}
+            {showGlobalResults && (globalQuery.trim() || searchingGlobal) && (
+              <div className="absolute left-0 mt-2 w-[540px] bg-[#151619] border border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-[480px] overflow-y-auto">
+                <div className="p-3 border-b border-white/5 flex justify-between items-center bg-[#1a1c20]">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    {searchingGlobal ? "Scanning system archives..." : "Search results"}
+                  </span>
+                  <button 
+                    onClick={() => setShowGlobalResults(false)}
+                    className="text-[10px] text-slate-400 hover:text-white font-medium bg-[#2c2d30] px-2 py-1 rounded"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+
+                {searchingGlobal ? (
+                  <div className="p-12 text-center text-xs text-slate-500 flex flex-col items-center justify-center gap-2">
+                    <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                    Retrieving matching logs...
+                  </div>
+                ) : globalResults && (
+                  Object.values(globalResults).some((arr: any) => arr && arr.length > 0)
+                ) ? (
+                  <div className="divide-y divide-white/[0.03] p-2 space-y-2">
+                    {/* Cases Category */}
+                    {globalResults.cases && globalResults.cases.length > 0 && (
+                      <div className="p-2 space-y-1">
+                        <h4 className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider mb-1 px-1">Matters & Cases ({globalResults.cases.length})</h4>
+                        {globalResults.cases.map((c: any) => (
+                          <div 
+                            key={c.id} 
+                            onClick={() => {
+                              setShowGlobalResults(false);
+                              navigate(`/cases/${c.id}`);
+                            }}
+                            className="p-2 rounded-lg hover:bg-[#1f2024] cursor-pointer transition-colors text-left"
+                          >
+                            <span className="text-xs font-semibold text-white block">{c.title}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">No: {c.case_number || 'Pending'} | Stage: {c.stage || 'Client Consultation'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Clients Category */}
+                    {globalResults.clients && globalResults.clients.length > 0 && (
+                      <div className="p-2 space-y-1">
+                        <h4 className="text-[9px] font-bold text-blue-400 uppercase tracking-wider mb-1 px-1">Registered Clients ({globalResults.clients.length})</h4>
+                        {globalResults.clients.map((c: any) => (
+                          <div 
+                            key={c.id} 
+                            onClick={() => {
+                              setShowGlobalResults(false);
+                              navigate('/clients');
+                            }}
+                            className="p-2 rounded-lg hover:bg-[#1f2024] cursor-pointer transition-colors text-left"
+                          >
+                            <span className="text-xs font-semibold text-white block">{c.name}</span>
+                            <span className="text-[10px] text-slate-400 font-medium">Company: {c.company || 'Private Client'} | Email: {c.email}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Documents Category */}
+                    {globalResults.documents && globalResults.documents.length > 0 && (
+                      <div className="p-2 space-y-1">
+                        <h4 className="text-[9px] font-bold text-purple-400 uppercase tracking-wider mb-1 px-1">Documents & Folders ({globalResults.documents.length})</h4>
+                        {globalResults.documents.map((d: any) => (
+                          <div 
+                            key={d.id} 
+                            onClick={() => {
+                              setShowGlobalResults(false);
+                              if (d.case_id) navigate(`/cases/${d.case_id}`);
+                              else navigate('/files');
+                            }}
+                            className="p-2 rounded-lg hover:bg-[#1f2024] cursor-pointer transition-colors text-left"
+                          >
+                            <span className="text-xs font-semibold text-white block">📂 {d.name}</span>
+                            <span className="text-[10px] text-slate-400 font-medium">{d.type} {d.category ? `• Category: ${d.category}` : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Hearings Category */}
+                    {globalResults.hearings && globalResults.hearings.length > 0 && (
+                      <div className="p-2 space-y-1">
+                        <h4 className="text-[9px] font-bold text-amber-500 uppercase tracking-wider mb-1 px-1">Hearings & Calendar Diary ({globalResults.hearings.length})</h4>
+                        {globalResults.hearings.map((h: any) => (
+                          <div 
+                            key={h.id} 
+                            onClick={() => {
+                              setShowGlobalResults(false);
+                              navigate('/diary');
+                            }}
+                            className="p-2 rounded-lg hover:bg-[#1f2024] cursor-pointer transition-colors text-left"
+                          >
+                            <span className="text-xs font-semibold text-white block">{h.title}</span>
+                            <span className="text-[10px] text-slate-400 font-medium">Venue: {h.venue} | Judge: {h.judge} | Date: {new Date(h.date).toLocaleDateString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Messages Category */}
+                    {globalResults.messages && globalResults.messages.length > 0 && (
+                      <div className="p-2 space-y-1">
+                        <h4 className="text-[9px] font-bold text-sky-400 uppercase tracking-wider mb-1 px-1">Encrypted Messages ({globalResults.messages.length})</h4>
+                        {globalResults.messages.map((m: any) => (
+                          <div 
+                            key={m.id} 
+                            onClick={() => {
+                              setShowGlobalResults(false);
+                              navigate('/messages');
+                            }}
+                            className="p-2 rounded-lg hover:bg-[#1f2024] cursor-pointer transition-colors text-left"
+                          >
+                            <span className="text-xs text-slate-300 block truncate font-medium">"{m.content}"</span>
+                            <span className="text-[10px] text-slate-500 font-mono">From: {m.sender} to {m.receiver}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Notes Category */}
+                    {globalResults.notes && globalResults.notes.length > 0 && (
+                      <div className="p-2 space-y-1">
+                        <h4 className="text-[9px] font-bold text-teal-400 uppercase tracking-wider mb-1 px-1">Pinboard & Case Notes ({globalResults.notes.length})</h4>
+                        {globalResults.notes.map((n: any) => (
+                          <div 
+                            key={n.id} 
+                            onClick={() => {
+                              setShowGlobalResults(false);
+                              if (n.case_id) navigate(`/cases/${n.case_id}`);
+                              else navigate('/cases');
+                            }}
+                            className="p-2 rounded-lg hover:bg-[#1f2024] cursor-pointer transition-colors text-left"
+                          >
+                            <span className="text-xs text-slate-300 block truncate font-medium">"{n.note}"</span>
+                            <span className="text-[10px] text-slate-500 font-mono">Authored by {n.author || 'Staff'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-12 text-center text-xs text-slate-500 italic">
+                    No matching records located in cases, clients, documents, hearings, messages or notes.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-4">
+            <NavLink 
+              to="/messages"
+              className="relative p-2 rounded-full border border-white/5 bg-[#1a1c20] text-slate-400 hover:text-emerald-500 hover:bg-[#26282d] transition-colors shadow-sm"
+            >
             <MessageSquare className="w-5 h-5" />
             {unreadMessages > 0 && (
               <div className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]">
@@ -307,6 +588,7 @@ export default function Layout() {
               </div>
             )}
           </NavLink>
+          </div>
         </header>
 
         <div className="flex-1 overflow-auto">

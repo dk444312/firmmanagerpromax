@@ -326,6 +326,167 @@ async function triggerReminders(
   return { tasks: countTasks, events: countEvents };
 }
 
+// Automatic Reminders Engine (Requirement 19)
+async function runAutomaticRemindersEngine() {
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  let events: any[] = [];
+  let tasks: any[] = [];
+  let staff: any[] = [];
+  let emailLogs: any[] = [];
+
+  // 1. Fetch data
+  if (supabase) {
+    try {
+      const [eRes, tRes, sRes, lRes] = await Promise.all([
+        supabase.from('events').select('*'),
+        supabase.from('tasks').select('*'),
+        supabase.from('staff').select('*'),
+        supabase.from('email_logs').select('*')
+      ]);
+      events = eRes.data || [];
+      tasks = tRes.data || [];
+      staff = sRes.data || [];
+      emailLogs = lRes.data || [];
+    } catch (err) {
+      console.error("Failed to query DB for automatic reminders:", err);
+      return { success: false, error: err };
+    }
+  } else {
+    events = db.mockEvents || [];
+    tasks = db.mockTasks || [];
+    staff = db.mockStaff || [];
+    emailLogs = db.mockEmailLogs || [];
+  }
+
+  let sentCount = 0;
+  const reports: string[] = [];
+
+  // Helper to check if a reminder email has already been sent
+  const hasSentAlready = (recipientEmail: string, subjectKeyword: string, uniqueKeyword: string) => {
+    return emailLogs.some(log => 
+      log.recipient_email === recipientEmail &&
+      log.subject.includes(subjectKeyword) &&
+      log.subject.includes(uniqueKeyword)
+    );
+  };
+
+  // 2. Process Hearings
+  // Filter events that represent hearings (contain 'hearing' or 'court' in title/description/category)
+  const hearings = events.filter(e => {
+    const title = (e.title || '').toLowerCase();
+    const desc = (e.description || '').toLowerCase();
+    const cat = (e.category || '').toLowerCase();
+    return title.includes('hearing') || title.includes('court') || desc.includes('hearing') || desc.includes('court') || cat.includes('hearing') || cat.includes('court');
+  });
+
+  for (const e of hearings) {
+    if (!e.date) continue;
+    // Parse event date and time
+    const eventTimeStr = e.time || '09:00:00';
+    const eventDateTime = new Date(`${e.date}T${eventTimeStr}`);
+    if (isNaN(eventDateTime.getTime())) continue;
+
+    const diffMs = eventDateTime.getTime() - now.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    const diffDays = diffHours / 24;
+
+    // Send reminders to staff in the firm who have notifications enabled
+    const eligibleStaff = staff.filter(s => s.firm_id === e.firm_id && s.emails && s.message_notifications !== false);
+
+    // Determine if any threshold is met
+    let thresholdLabel = '';
+    let subjectKeyword = '';
+    let descriptionText = '';
+
+    // Check thresholds:
+    // 7 Days: between 6.7 days and 7.3 days (roughly 161 to 175 hours)
+    if (diffDays >= 6.7 && diffDays <= 7.3) {
+      thresholdLabel = '7 days';
+      subjectKeyword = '[7-Day Reminder]';
+      descriptionText = 'is scheduled in 7 days';
+    } 
+    // 3 Days: between 2.7 days and 3.3 days (roughly 65 to 79 hours)
+    else if (diffDays >= 2.7 && diffDays <= 3.3) {
+      thresholdLabel = '3 days';
+      subjectKeyword = '[3-Day Reminder]';
+      descriptionText = 'is scheduled in 3 days';
+    }
+    // 1 Day: between 22 hours and 26 hours
+    else if (diffHours >= 22 && diffHours <= 26) {
+      thresholdLabel = '1 day';
+      subjectKeyword = '[1-Day Reminder]';
+      descriptionText = 'is scheduled tomorrow';
+    }
+    // 2 Hours: between 1.5 hours and 2.5 hours
+    else if (diffHours >= 1.5 && diffHours <= 2.5) {
+      thresholdLabel = '2 hours';
+      subjectKeyword = '[2-Hour Urgent Reminder]';
+      descriptionText = 'is starting in 2 hours';
+    }
+
+    if (thresholdLabel) {
+      for (const s of eligibleStaff) {
+        const uniqueKeyword = `Event:${e.id}:${thresholdLabel}`;
+        if (!hasSentAlready(s.emails, subjectKeyword, uniqueKeyword)) {
+          const subject = `${subjectKeyword} Upcoming Hearing: ${e.title} (${uniqueKeyword})`;
+          const body = `
+            <p>This is an automatic notification that the following upcoming court hearing/event <strong>${descriptionText}</strong>:</p>
+            <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0;">
+              <p style="margin: 0 0 8px 0;"><strong>Hearing Title:</strong> ${e.title}</p>
+              <p style="margin: 0 0 8px 0;"><strong>Date:</strong> ${new Date(e.date).toLocaleDateString()}</p>
+              <p style="margin: 0 0 8px 0;"><strong>Time:</strong> ${e.time || 'N/A'}</p>
+              <p style="margin: 0;"><strong>Venue/Court:</strong> ${e.venue || 'N/A'}</p>
+            </div>
+            <p>Please prepare any necessary court briefs and ensure all relevant case files are compiled.</p>
+          `;
+          await sendAndLogEmail(e.firm_id, s.id, s.emails, subject, body, s.name);
+          sentCount++;
+          reports.push(`Sent ${thresholdLabel} reminder for "${e.title}" to ${s.name} (${s.emails})`);
+        }
+      }
+    }
+  }
+
+  // 3. Process Overdue Tasks
+  const overdueTasks = tasks.filter(t => {
+    if (t.status === 'Completed' || !t.due_date) return false;
+    const dueDate = new Date(t.due_date);
+    const taskDueStr = dueDate.toISOString().split('T')[0];
+    return taskDueStr < todayStr;
+  });
+
+  for (const t of overdueTasks) {
+    const assignedIds = t.assigned_to || [];
+    if (assignedIds.length === 0) continue;
+
+    const assignedStaff = staff.filter(s => assignedIds.includes(s.id) && s.emails && s.message_notifications !== false);
+
+    for (const s of assignedStaff) {
+      const uniqueKeyword = `Task:${t.id}:Overdue:${todayStr}`;
+      const subjectKeyword = '[Overdue Task Reminder]';
+
+      if (!hasSentAlready(s.emails, subjectKeyword, uniqueKeyword)) {
+        const subject = `${subjectKeyword} Action Required: "${t.name}" is OVERDUE (${uniqueKeyword})`;
+        const body = `
+          <p>This is an automatic notification that the following task assigned to you is currently <strong>OVERDUE</strong>:</p>
+          <div style="background-color: #fff1f2; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #fecdd3;">
+            <p style="margin: 0 0 8px 0; color: #9f1239;"><strong>Task Name:</strong> ${t.name}</p>
+            <p style="margin: 0 0 8px 0;"><strong>Due Date:</strong> ${new Date(t.due_date).toLocaleDateString()}</p>
+            <p style="margin: 0;"><strong>Description:</strong> ${t.description || 'No description provided.'}</p>
+          </div>
+          <p>Please update the task status in the portal once completed to stop these automated reminders.</p>
+        `;
+        await sendAndLogEmail(t.firm_id || s.firm_id, s.id, s.emails, subject, body, s.name);
+        sentCount++;
+        reports.push(`Sent daily overdue task reminder for "${t.name}" to ${s.name} (${s.emails})`);
+      }
+    }
+  }
+
+  return { success: true, sentCount, reports };
+}
+
 // Use a local JSON file to persist the simulated mock database across dev server restarts
 const DB_FILE = path.join(process.cwd(), 'local-db.json');
 let mockFirmId = "00000000-0000-0000-0000-000000000000";
@@ -342,8 +503,8 @@ let db = {
     { id: "3", firm_id: mockFirmId, name: "Jane Smith", username: "janesmith", password_hash: bcrypt.hashSync("password", 10), role: "Clerk", accessible_menus: ["files", "diary"], case_access_mode: "assigned", allowed_cases: [], allowed_folders: [], status: "active", picture: "" }
   ] as any[],
   mockCases: [
-    { id: "c1", firm_id: mockFirmId, title: "Smith v. Jones", description: "Breach of contract", stage: "Pre-trial", assigned_staff_ids: ["2"], claimant: "Smith", defendant: "Jones", case_number: "CV-2023-01", court: "High Court", registry_court: "Main", judge_name: "Hon. Clark", brief_facts: "Contract was breached in 2022.", status: "Active" },
-    { id: "c2", firm_id: mockFirmId, title: "State v. Doe", description: "Criminal defense", stage: "Discovery", assigned_staff_ids: [], claimant: "State", defendant: "Doe", case_number: "CR-2023-44", court: "Magistrates Court", registry_court: "Local", judge_name: "Hon. Davis", brief_facts: "N/A", status: "Active" }
+    { id: "c1", firm_id: mockFirmId, title: "Smith v. Jones", description: "Breach of contract", stage: "Pre-trial", assigned_staff_ids: ["2"], claimant: "Smith", defendant: "Jones", case_number: "CV-2023-01", court: "High Court - Civil Division", registry_court: "Main", judge_name: "Hon. Clark", brief_facts: "Contract was breached in 2022.", status: "Active", likelihood_of_loss_gain: 30, potential_loss: 45000000, estimated_legal_fees: 3500000, department: "Civil", case_type: "Breach of Contract", labels: ["Urgent"] },
+    { id: "c2", firm_id: mockFirmId, title: "State v. Doe", description: "Criminal defense", stage: "Discovery", assigned_staff_ids: [], claimant: "State", defendant: "Doe", case_number: "CR-2023-44", court: "Magistrates Court", registry_court: "Local", judge_name: "Hon. Davis", brief_facts: "N/A", status: "Active", likelihood_of_loss_gain: 75, potential_loss: 12000000, estimated_legal_fees: 1800000, department: "Criminal", case_type: "Theft", labels: ["High Profile"] }
   ] as any[],
   mockTasks: [] as any[],
   mockEvents: [] as any[],
@@ -354,7 +515,11 @@ let db = {
   mockClients: [] as any[],
   mockDrafts: [] as any[],
   mockAtlasThreads: [] as any[],
-  mockAtlasMessages: [] as any[]
+  mockAtlasMessages: [] as any[],
+  mockCaseMilestones: [] as any[],
+  mockFileVersions: [] as any[],
+  mockTimeRecords: [] as any[],
+  mockAuditLogs: [] as any[]
 };
 
 // Load existing DB or initialize if missing
@@ -2410,7 +2575,1366 @@ Dated at Lilongwe this 24th day of May, 2026.`;
     }
   });
 
-  // Vite middleware for development
+  // --- Case Milestones (Timeline) Endpoints ---
+  app.get("/api/cases/:id/milestones", authenticateToken, async (req, res) => {
+    const caseId = req.params.id;
+    const defaultMilestoneTitles = [
+      "Client Creation",
+      "Filing of Summons",
+      "Defence",
+      "Reply",
+      "Mediation (where applicable)",
+      "Scheduling Conferences",
+      "Notices of Hearing",
+      "Witness Statements",
+      "Trial",
+      "Judgment",
+      "Appeal"
+    ];
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('case_milestones')
+          .select('*')
+          .eq('case_id', caseId)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          return res.json(data);
+        }
+
+        // Auto-seed milestones if empty
+        const seedData = defaultMilestoneTitles.map((title, index) => ({
+          id: crypto.randomUUID(),
+          case_id: caseId,
+          title,
+          description: `Chronological stage ${index + 1} of the matter.`,
+          status: title === "Client Creation" ? "Completed" : "Pending",
+          completed_at: title === "Client Creation" ? new Date().toISOString() : null,
+          notes: title === "Client Creation" ? "Case file opened automatically." : ""
+        }));
+
+        const { data: seeded, error: seedErr } = await supabase
+          .from('case_milestones')
+          .insert(seedData)
+          .select();
+
+        if (seedErr) {
+          console.warn("Could not seed case_milestones in Supabase, using mock fallback", seedErr);
+          throw seedErr;
+        }
+
+        return res.json(seeded);
+      } catch (e) {
+        // Fallback to local DB
+        db.mockCaseMilestones = db.mockCaseMilestones || [];
+        const filtered = db.mockCaseMilestones.filter(m => m.case_id === caseId);
+        if (filtered.length > 0) {
+          return res.json(filtered);
+        }
+
+        const seedData = defaultMilestoneTitles.map((title, index) => ({
+          id: `m_${Date.now()}_${index}`,
+          case_id: caseId,
+          title,
+          description: `Chronological stage ${index + 1} of the matter.`,
+          status: title === "Client Creation" ? "Completed" : "Pending",
+          completed_at: title === "Client Creation" ? new Date().toISOString() : null,
+          notes: title === "Client Creation" ? "Case file opened automatically." : ""
+        }));
+
+        db.mockCaseMilestones.push(...seedData);
+        saveDb();
+        return res.json(seedData);
+      }
+    } else {
+      db.mockCaseMilestones = db.mockCaseMilestones || [];
+      const filtered = db.mockCaseMilestones.filter(m => m.case_id === caseId);
+      if (filtered.length > 0) {
+        return res.json(filtered);
+      }
+
+      const seedData = defaultMilestoneTitles.map((title, index) => ({
+        id: `m_${Date.now()}_${index}`,
+        case_id: caseId,
+        title,
+        description: `Chronological stage ${index + 1} of the matter.`,
+        status: title === "Client Creation" ? "Completed" : "Pending",
+        completed_at: title === "Client Creation" ? new Date().toISOString() : null,
+        notes: title === "Client Creation" ? "Case file opened automatically." : ""
+      }));
+
+      db.mockCaseMilestones.push(...seedData);
+      saveDb();
+      return res.json(seedData);
+    }
+  });
+
+  app.post("/api/case_milestones", authenticateToken, async (req, res) => {
+    const newMilestone = {
+      id: crypto.randomUUID(),
+      ...req.body,
+      created_at: new Date().toISOString()
+    };
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('case_milestones')
+          .insert([newMilestone])
+          .select()
+          .single();
+
+        if (error) throw error;
+        return res.json(data);
+      } catch (e) {
+        db.mockCaseMilestones = db.mockCaseMilestones || [];
+        db.mockCaseMilestones.push(newMilestone);
+        saveDb();
+        return res.json(newMilestone);
+      }
+    } else {
+      db.mockCaseMilestones = db.mockCaseMilestones || [];
+      db.mockCaseMilestones.push(newMilestone);
+      saveDb();
+      return res.json(newMilestone);
+    }
+  });
+
+  app.put("/api/case_milestones/:id", authenticateToken, async (req, res) => {
+    const id = req.params.id;
+    const updateData = req.body;
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('case_milestones')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return res.json(data);
+      } catch (e) {
+        db.mockCaseMilestones = db.mockCaseMilestones || [];
+        const idx = db.mockCaseMilestones.findIndex(m => m.id === id);
+        if (idx > -1) {
+          db.mockCaseMilestones[idx] = { ...db.mockCaseMilestones[idx], ...updateData };
+          saveDb();
+          return res.json(db.mockCaseMilestones[idx]);
+        }
+        return res.status(404).json({ error: "Milestone not found" });
+      }
+    } else {
+      db.mockCaseMilestones = db.mockCaseMilestones || [];
+      const idx = db.mockCaseMilestones.findIndex(m => m.id === id);
+      if (idx > -1) {
+        db.mockCaseMilestones[idx] = { ...db.mockCaseMilestones[idx], ...updateData };
+        saveDb();
+        return res.json(db.mockCaseMilestones[idx]);
+      }
+      return res.status(404).json({ error: "Milestone not found" });
+    }
+  });
+
+
+  // --- Universal Search Endpoint ---
+  app.get("/api/search", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    const query = (req.query.q as string || "").trim().toLowerCase();
+
+    if (!query) {
+      return res.json({
+        clients: [],
+        cases: [],
+        files: [],
+        events: [],
+        messages: [],
+        notes: [],
+        tasks: [],
+        folders: [],
+        milestones: []
+      });
+    }
+
+    try {
+      let clients: any[] = [];
+      let cases: any[] = [];
+      let files: any[] = [];
+      let events: any[] = [];
+      let teamMessages: any[] = [];
+      let atlasMessages: any[] = [];
+      let caseNotes: any[] = [];
+      let tasks: any[] = [];
+      let folders: any[] = [];
+      let milestones: any[] = [];
+
+      if (supabase) {
+        const [
+          clientsRes,
+          casesRes,
+          filesRes,
+          eventsRes,
+          teamMessagesRes,
+          atlasMessagesRes,
+          caseNotesRes,
+          tasksRes,
+          foldersRes,
+          milestonesRes
+        ] = await Promise.all([
+          supabase.from('clients').select('*').eq('firm_id', user.firm_id),
+          supabase.from('cases').select('*').eq('firm_id', user.firm_id),
+          supabase.from('files').select('*').eq('firm_id', user.firm_id),
+          supabase.from('events').select('*').eq('firm_id', user.firm_id),
+          supabase.from('messages').select('*').eq('firm_id', user.firm_id),
+          supabase.from('atlas_messages').select('*').eq('firm_id', user.firm_id),
+          supabase.from('case_notes').select('*'),
+          supabase.from('tasks').select('*').eq('firm_id', user.firm_id),
+          supabase.from('folders').select('*').eq('firm_id', user.firm_id),
+          supabase.from('case_milestones').select('*')
+        ]);
+
+        clients = clientsRes.data || [];
+        cases = casesRes.data || [];
+        files = filesRes.data || [];
+        events = eventsRes.data || [];
+        teamMessages = teamMessagesRes.data || [];
+        atlasMessages = atlasMessagesRes.data || [];
+        caseNotes = caseNotesRes.data || [];
+        tasks = tasksRes.data || [];
+        folders = foldersRes.data || [];
+        milestones = milestonesRes.data || [];
+      } else {
+        clients = db.mockClients || [];
+        cases = db.mockCases || [];
+        files = db.mockFiles || [];
+        events = db.mockEvents || [];
+        teamMessages = [];
+        atlasMessages = db.mockAtlasMessages || [];
+        caseNotes = db.mockCaseNotes || [];
+        tasks = db.mockTasks || [];
+        folders = db.mockFolders || [];
+        milestones = db.mockCaseMilestones || [];
+      }
+
+      const matchQuery = (val: any) => {
+        if (val === null || val === undefined) return false;
+        return String(val).toLowerCase().includes(query);
+      };
+
+      const filteredClients = clients.filter(c => 
+        c.firm_id === user.firm_id && (
+          matchQuery(c.full_name) || 
+          matchQuery(c.email) || 
+          matchQuery(c.phone_number) || 
+          matchQuery(c.company)
+        )
+      );
+
+      const filteredCases = cases.filter(c => 
+        c.firm_id === user.firm_id && (
+          matchQuery(c.title) || 
+          matchQuery(c.case_number) || 
+          matchQuery(c.claimant) || 
+          matchQuery(c.defendant) || 
+          matchQuery(c.brief_facts) || 
+          matchQuery(c.description) ||
+          matchQuery(c.court)
+        )
+      );
+
+      const filteredFiles = files.filter(f => 
+        f.firm_id === user.firm_id && (
+          matchQuery(f.filename) || 
+          matchQuery(f.doc_type) || 
+          matchQuery(f.tags) || 
+          matchQuery(f.classification)
+        )
+      );
+
+      const filteredEvents = events.filter(e => 
+        e.firm_id === user.firm_id && (
+          matchQuery(e.title) || 
+          matchQuery(e.description) || 
+          matchQuery(e.type) ||
+          matchQuery(e.venue) ||
+          matchQuery(e.judge)
+        )
+      );
+
+      const allMessages = [
+        ...teamMessages.map(m => ({ ...m, source: 'team' })),
+        ...atlasMessages.map(m => ({ ...m, source: 'atlas' }))
+      ];
+      const filteredMessages = allMessages.filter(m => 
+        m.firm_id === user.firm_id && matchQuery(m.content)
+      );
+
+      const firmCaseIds = new Set(cases.filter(c => c.firm_id === user.firm_id).map(c => c.id));
+      const filteredNotes = caseNotes.filter(n => 
+        firmCaseIds.has(n.case_id) && matchQuery(n.note)
+      );
+
+      const filteredTasks = tasks.filter(t => 
+        t.firm_id === user.firm_id && (
+          matchQuery(t.name) || 
+          matchQuery(t.priority) || 
+          matchQuery(t.status)
+        )
+      );
+
+      const filteredFolders = folders.filter(f => 
+        f.firm_id === user.firm_id && matchQuery(f.name)
+      );
+
+      const filteredMilestones = milestones.filter(m => 
+        firmCaseIds.has(m.case_id) && (
+          matchQuery(m.title) || 
+          matchQuery(m.description) || 
+          matchQuery(m.notes)
+        )
+      );
+
+      return res.json({
+        clients: filteredClients,
+        cases: filteredCases,
+        files: filteredFiles,
+        events: filteredEvents,
+        messages: filteredMessages,
+        notes: filteredNotes,
+        tasks: filteredTasks,
+        folders: filteredFolders,
+        milestones: filteredMilestones
+      });
+
+    } catch (e: any) {
+      console.error("Error performing search query:", e);
+      return res.status(500).json({ error: e.message || "Search failed" });
+    }
+  });
+
+
+  // --- Document Version History Endpoints ---
+  app.get("/api/files/:fileId/versions", authenticateToken, async (req, res) => {
+    const fileId = req.params.fileId;
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('file_versions')
+          .select('*')
+          .eq('file_id', fileId)
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        return res.json(data);
+      } catch (e) {
+        db.mockFileVersions = db.mockFileVersions || [];
+        const filtered = db.mockFileVersions.filter(v => v.file_id === fileId);
+        return res.json(filtered.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      }
+    } else {
+      db.mockFileVersions = db.mockFileVersions || [];
+      const filtered = db.mockFileVersions.filter(v => v.file_id === fileId);
+      return res.json(filtered.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    }
+  });
+
+  app.post("/api/file_versions", authenticateToken, async (req, res) => {
+    const newVersion = {
+      id: crypto.randomUUID(),
+      ...req.body,
+      created_at: new Date().toISOString()
+    };
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('file_versions')
+          .insert([newVersion])
+          .select()
+          .single();
+
+        if (error) throw error;
+        return res.json(data);
+      } catch (e) {
+        db.mockFileVersions = db.mockFileVersions || [];
+        db.mockFileVersions.push(newVersion);
+        saveDb();
+        return res.json(newVersion);
+      }
+    } else {
+      db.mockFileVersions = db.mockFileVersions || [];
+      db.mockFileVersions.push(newVersion);
+      saveDb();
+      return res.json(newVersion);
+    }
+  });
+
+  app.put("/api/files/:id/restore-version", authenticateToken, async (req, res) => {
+    const fileId = req.params.id;
+    const { filename, file_url, version_number, doc_type, tags, classification, author } = req.body;
+
+    const updateData = {
+      filename,
+      file_url,
+      version_number,
+      doc_type: doc_type || 'Other',
+      tags: tags || '',
+      classification: classification || 'Working Draft',
+      author: author || 'System',
+      last_edited_at: new Date().toISOString()
+    };
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('files')
+          .update(updateData)
+          .eq('id', fileId)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return res.json(data);
+      } catch (e) {
+        db.mockFiles = db.mockFiles || [];
+        const idx = db.mockFiles.findIndex(f => f.id === fileId);
+        if (idx > -1) {
+          db.mockFiles[idx] = { ...db.mockFiles[idx], ...updateData };
+          saveDb();
+          return res.json(db.mockFiles[idx]);
+        }
+        return res.status(404).json({ error: "File not found" });
+      }
+    } else {
+      db.mockFiles = db.mockFiles || [];
+      const idx = db.mockFiles.findIndex(f => f.id === fileId);
+      if (idx > -1) {
+        db.mockFiles[idx] = { ...db.mockFiles[idx], ...updateData };
+        saveDb();
+        return res.json(db.mockFiles[idx]);
+      }
+      return res.status(404).json({ error: "File not found" });
+    }
+  });
+
+
+  // --- Audit Log Helper ---
+  async function recordAuditLog(req: any, action: string, details: string) {
+    const user = req.user;
+    if (!user) return;
+    const ip = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || "Unknown";
+    const userAgent = req.headers['user-agent'] || "Unknown";
+
+    const logItem = {
+      id: crypto.randomUUID(),
+      firm_id: user.firm_id,
+      staff_id: user.id,
+      staff_name: user.name || "Staff Member",
+      action,
+      details,
+      ip_address: ip,
+      user_agent: userAgent,
+      created_at: new Date().toISOString()
+    };
+
+    if (supabase) {
+      try {
+        await supabase.from('audit_logs').insert([logItem]);
+      } catch (e) {
+        console.error("Failed to write to Supabase audit_logs:", e);
+        db.mockAuditLogs = db.mockAuditLogs || [];
+        db.mockAuditLogs.push(logItem);
+        saveDb();
+      }
+    } else {
+      db.mockAuditLogs = db.mockAuditLogs || [];
+      db.mockAuditLogs.push(logItem);
+      saveDb();
+    }
+  }
+
+  // --- Audit Logs Endpoint ---
+  app.get("/api/audit_logs", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('audit_logs')
+          .select('*')
+          .eq('firm_id', user.firm_id)
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        return res.json(data);
+      } catch (e) {
+        db.mockAuditLogs = db.mockAuditLogs || [];
+        const filtered = db.mockAuditLogs.filter(l => l.firm_id === user.firm_id);
+        return res.json(filtered.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      }
+    } else {
+      db.mockAuditLogs = db.mockAuditLogs || [];
+      const filtered = db.mockAuditLogs.filter(l => l.firm_id === user.firm_id);
+      return res.json(filtered.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    }
+  });
+
+  app.post("/api/audit_logs", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    const { action, details } = req.body;
+    await recordAuditLog(req, action, details);
+    return res.json({ status: "success" });
+  });
+
+  // --- Time Recording Endpoints ---
+  app.get("/api/time_records", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('time_records')
+          .select('*')
+          .eq('firm_id', user.firm_id)
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        return res.json(data);
+      } catch (e) {
+        db.mockTimeRecords = db.mockTimeRecords || [];
+        const filtered = db.mockTimeRecords.filter(t => t.firm_id === user.firm_id);
+        return res.json(filtered.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      }
+    } else {
+      db.mockTimeRecords = db.mockTimeRecords || [];
+      const filtered = db.mockTimeRecords.filter(t => t.firm_id === user.firm_id);
+      return res.json(filtered.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    }
+  });
+
+  app.post("/api/time_records", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    const newRecord = {
+      id: crypto.randomUUID(),
+      firm_id: user.firm_id,
+      staff_id: user.id,
+      created_at: new Date().toISOString(),
+      ...req.body
+    };
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('time_records')
+          .insert([newRecord])
+          .select()
+          .single();
+        if (error) throw error;
+        await recordAuditLog(req, "Time Recorded", `Logged ${Math.round(newRecord.duration_seconds / 60)} minutes of ${newRecord.nature_of_work} on case: ${newRecord.case_title || 'unspecified'}`);
+        return res.json(data);
+      } catch (e) {
+        db.mockTimeRecords = db.mockTimeRecords || [];
+        db.mockTimeRecords.push(newRecord);
+        saveDb();
+        await recordAuditLog(req, "Time Recorded", `Logged ${Math.round(newRecord.duration_seconds / 60)} minutes of ${newRecord.nature_of_work} on case: ${newRecord.case_title || 'unspecified'}`);
+        return res.json(newRecord);
+      }
+    } else {
+      db.mockTimeRecords = db.mockTimeRecords || [];
+      db.mockTimeRecords.push(newRecord);
+      saveDb();
+      await recordAuditLog(req, "Time Recorded", `Logged ${Math.round(newRecord.duration_seconds / 60)} minutes of ${newRecord.nature_of_work} on case: ${newRecord.case_title || 'unspecified'}`);
+      return res.json(newRecord);
+    }
+  });
+
+  app.delete("/api/time_records/:id", authenticateToken, async (req, res) => {
+    const id = req.params.id;
+    const user = (req as any).user;
+
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('time_records')
+          .delete()
+          .eq('id', id);
+        if (error) throw error;
+        await recordAuditLog(req, "Deleted Time Record", `Deleted time record: ${id}`);
+        return res.json({ success: true });
+      } catch (e) {
+        db.mockTimeRecords = db.mockTimeRecords || [];
+        db.mockTimeRecords = db.mockTimeRecords.filter(t => t.id !== id);
+        saveDb();
+        await recordAuditLog(req, "Deleted Time Record", `Deleted time record: ${id}`);
+        return res.json({ success: true });
+      }
+    } else {
+      db.mockTimeRecords = db.mockTimeRecords || [];
+      db.mockTimeRecords = db.mockTimeRecords.filter(t => t.id !== id);
+      saveDb();
+      await recordAuditLog(req, "Deleted Time Record", `Deleted time record: ${id}`);
+      return res.json({ success: true });
+    }
+  });
+
+  // --- Conflict of Interest Check Endpoint ---
+  app.post("/api/cases/conflict-check", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    const { claimant, defendant, companies, directors } = req.body;
+
+    const queryTerms = [
+      claimant,
+      defendant,
+      companies,
+      directors
+    ].filter(Boolean).map(term => String(term).trim().toLowerCase());
+
+    if (queryTerms.length === 0) {
+      return res.json({ conflict: false, reasons: [] });
+    }
+
+    try {
+      let cases: any[] = [];
+      let clients: any[] = [];
+
+      if (supabase) {
+        const [casesRes, clientsRes] = await Promise.all([
+          supabase.from('cases').select('*').eq('firm_id', user.firm_id),
+          supabase.from('clients').select('*').eq('firm_id', user.firm_id)
+        ]);
+        cases = casesRes.data || [];
+        clients = clientsRes.data || [];
+      } else {
+        cases = db.mockCases || [];
+        clients = db.mockClients || [];
+      }
+
+      const reasons: string[] = [];
+
+      // Check cases for conflicts
+      cases.forEach(c => {
+        const caseIdStr = c.case_number ? `(${c.case_number})` : "";
+        const termsToCheck = [
+          c.claimant,
+          c.defendant,
+          c.companies,
+          c.directors,
+          c.title
+        ].filter(Boolean).map(t => String(t).toLowerCase());
+
+        queryTerms.forEach(term => {
+          termsToCheck.forEach(ct => {
+            if (ct.includes(term)) {
+              reasons.push(`Match with active Case "${c.title}" ${caseIdStr} (Matched on term: "${term}")`);
+            }
+          });
+        });
+      });
+
+      // Check clients for conflicts
+      clients.forEach(cl => {
+        const clientName = String(cl.full_name || "").toLowerCase();
+        const clientCompany = String(cl.company || "").toLowerCase();
+
+        queryTerms.forEach(term => {
+          if (clientName.includes(term)) {
+            reasons.push(`Match with existing/former Client "${cl.full_name}" (Matched on term: "${term}")`);
+          }
+          if (clientCompany && clientCompany.includes(term)) {
+            reasons.push(`Match with Client Company "${cl.company}" of "${cl.full_name}" (Matched on term: "${term}")`);
+          }
+        });
+      });
+
+      // Record this attempt in the Audit Trail!
+      const searchTermsLog = queryTerms.join(", ");
+      await recordAuditLog(req, "Conflict Check Performed", `Searched for: ${searchTermsLog}. Found ${reasons.length} potential conflicts.`);
+
+      return res.json({
+        conflict: reasons.length > 0,
+        reasons: Array.from(new Set(reasons)) // deduplicate reasons
+      });
+
+    } catch (e: any) {
+      console.error("Conflict check error:", e);
+      return res.status(500).json({ error: e.message || "Conflict check failed" });
+    }
+  });
+
+  // --- Case Note Pin / Update Endpoints ---
+  app.put("/api/case_notes/:id", authenticateToken, async (req, res) => {
+    const id = req.params.id;
+    const updateData = req.body; // e.g. { pinned: true } or { content: '...' }
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('case_notes')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+        if (error) throw error;
+        await recordAuditLog(req, "Updated Case Note", `Updated case note properties: ${Object.keys(updateData).join(', ')}`);
+        return res.json(data);
+      } catch (e) {
+        db.mockCaseNotes = db.mockCaseNotes || [];
+        const idx = db.mockCaseNotes.findIndex(n => n.id === id);
+        if (idx > -1) {
+          db.mockCaseNotes[idx] = { ...db.mockCaseNotes[idx], ...updateData };
+          saveDb();
+          await recordAuditLog(req, "Updated Case Note", `Updated mock case note properties: ${Object.keys(updateData).join(', ')}`);
+          return res.json(db.mockCaseNotes[idx]);
+        }
+        return res.status(404).json({ error: "Note not found" });
+      }
+    } else {
+      db.mockCaseNotes = db.mockCaseNotes || [];
+      const idx = db.mockCaseNotes.findIndex(n => n.id === id);
+      if (idx > -1) {
+        db.mockCaseNotes[idx] = { ...db.mockCaseNotes[idx], ...updateData };
+        saveDb();
+        await recordAuditLog(req, "Updated Case Note", `Updated mock case note properties: ${Object.keys(updateData).join(', ')}`);
+        return res.json(db.mockCaseNotes[idx]);
+      }
+      return res.status(404).json({ error: "Note not found" });
+    }
+  });
+
+  // --- Analytical Reports Endpoint ---
+  app.get("/api/reports", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+
+    try {
+      let cases: any[] = [];
+      let clients: any[] = [];
+      let events: any[] = [];
+      let tasks: any[] = [];
+      let staff: any[] = [];
+      let timeRecords: any[] = [];
+
+      if (supabase) {
+        const [casesRes, clientsRes, eventsRes, tasksRes, staffRes, timeRes] = await Promise.all([
+          supabase.from('cases').select('*').eq('firm_id', user.firm_id),
+          supabase.from('clients').select('*').eq('firm_id', user.firm_id),
+          supabase.from('events').select('*').eq('firm_id', user.firm_id),
+          supabase.from('tasks').select('*').eq('firm_id', user.firm_id),
+          supabase.from('staff').select('id, name, role, username').eq('firm_id', user.firm_id),
+          supabase.from('time_records').select('*').eq('firm_id', user.firm_id)
+        ]);
+
+        cases = casesRes.data || [];
+        clients = clientsRes.data || [];
+        events = eventsRes.data || [];
+        tasks = tasksRes.data || [];
+        staff = staffRes.data || [];
+        timeRecords = timeRes.data || [];
+      } else {
+        cases = db.mockCases || [];
+        clients = db.mockClients || [];
+        events = db.mockEvents || [];
+        tasks = db.mockTasks || [];
+        staff = db.mockStaff || [];
+        timeRecords = db.mockTimeRecords || [];
+      }
+
+      // 1. Matters Opened & Closed
+      const openedCount = cases.length;
+      const closedCount = cases.filter(c => c.status === 'Closed' || c.stage === 'Closed').length;
+      const activeCount = openedCount - closedCount;
+
+      // 2. Monthly registration trend
+      const monthlyCaseTrend: Record<string, number> = {};
+      cases.forEach(c => {
+        const date = new Date(c.created_at || Date.now());
+        const monthKey = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+        monthlyCaseTrend[monthKey] = (monthlyCaseTrend[monthKey] || 0) + 1;
+      });
+
+      // 3. Court Performance
+      const courtBreakdown: Record<string, number> = {};
+      cases.forEach(c => {
+        const court = c.court || "Other/Unspecified";
+        courtBreakdown[court] = (courtBreakdown[court] || 0) + 1;
+      });
+
+      // 4. Most active lawyer (by cases assigned, tasks completed, time records)
+      const lawyerActivity = staff.map(s => {
+        const assignedCases = cases.filter(c => c.assigned_staff_ids?.includes(s.id) || c.assigned_staff_id === s.id).length;
+        const completedTasks = tasks.filter(t => t.assigned_to === s.id && t.status === 'Completed').length;
+        const loggedTime = timeRecords.filter(t => t.staff_id === s.id).reduce((acc, curr) => acc + (curr.duration_seconds || 0), 0);
+        
+        return {
+          id: s.id,
+          name: s.name,
+          role: s.role,
+          assignedCases,
+          completedTasks,
+          hoursTracked: Number((loggedTime / 3600).toFixed(1))
+        };
+      }).sort((a, b) => b.hoursTracked - a.hoursTracked || b.assignedCases - a.assignedCases);
+
+      // 5. Productivity hours by Nature of Work
+      const productivityByNature: Record<string, number> = {
+        'Drafting': 0,
+        'Legal Research': 0,
+        'Court Attendance': 0,
+        'Consultations': 0,
+        'Travelling': 0,
+        'Telephone Calls': 0,
+        'Other': 0
+      };
+      timeRecords.forEach(t => {
+        const hours = (t.duration_seconds || 0) / 3600;
+        const rawNature = t.nature_of_work || "Other";
+        // match nature keys case-insensitively or exactly
+        let matchedKey = "Other";
+        Object.keys(productivityByNature).forEach(k => {
+          if (k.toLowerCase() === rawNature.toLowerCase()) {
+            matchedKey = k;
+          }
+        });
+        productivityByNature[matchedKey] = Number((productivityByNature[matchedKey] + hours).toFixed(2));
+      });
+
+      // 6. Upcoming hearings
+      const upcomingHearings = events.filter(e => {
+        const date = new Date(e.start_time || e.date);
+        return date >= new Date();
+      }).map(e => ({
+        id: e.id,
+        title: e.title,
+        date: e.start_time || e.date,
+        venue: e.venue || "Unspecified",
+        judge: e.judge || "Unspecified"
+      })).slice(0, 10);
+
+      // 7. Client Growth Trend
+      const monthlyClientTrend: Record<string, number> = {};
+      clients.forEach(c => {
+        const date = new Date(c.created_at || Date.now());
+        const monthKey = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+        monthlyClientTrend[monthKey] = (monthlyClientTrend[monthKey] || 0) + 1;
+      });
+
+      // Record report run in Audit Trail!
+      await recordAuditLog(req, "Generated Analytics Report", "Exported and viewed general law firm performance reports.");
+
+      return res.json({
+        summary: {
+          totalCases: openedCount,
+          activeCases: activeCount,
+          closedCases: closedCount,
+          totalHours: Number((timeRecords.reduce((acc, curr) => acc + (curr.duration_seconds || 0), 0) / 3600).toFixed(1)),
+          totalClients: clients.length,
+          upcomingHearingsCount: upcomingHearings.length
+        },
+        caseTrend: Object.keys(monthlyCaseTrend).map(month => ({ month, count: monthlyCaseTrend[month] })),
+        clientTrend: Object.keys(monthlyClientTrend).map(month => ({ month, count: monthlyClientTrend[month] })),
+        courtBreakdown: Object.keys(courtBreakdown).map(court => ({ name: court, value: courtBreakdown[court] })),
+        productivity: Object.keys(productivityByNature).map(name => ({ name, value: productivityByNature[name] })),
+        lawyerActivity,
+        upcomingHearings
+      });
+
+    } catch (e: any) {
+      console.error("Reports aggregation failed:", e);
+      return res.status(500).json({ error: e.message || "Failed to generate reports" });
+    }
+  });
+
+
+  // --- Universal Search Endpoint ---
+  app.get("/api/universal-search", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    const query = (req.query.q || "").toString().trim().toLowerCase();
+
+    if (!query) {
+      return res.json({ cases: [], clients: [], documents: [], hearings: [], messages: [], notes: [] });
+    }
+
+    try {
+      let casesResult: any[] = [];
+      let clientsResult: any[] = [];
+      let documentsResult: any[] = [];
+      let hearingsResult: any[] = [];
+      let messagesResult: any[] = [];
+      let notesResult: any[] = [];
+
+      if (supabase) {
+        // 1. Search cases
+        const { data: casesData } = await supabase
+          .from('cases')
+          .select('*')
+          .eq('firm_id', user.firm_id);
+        
+        if (casesData) {
+          casesResult = casesData.filter(c => 
+            (c.title || '').toLowerCase().includes(query) ||
+            (c.case_number || '').toLowerCase().includes(query) ||
+            (c.description || '').toLowerCase().includes(query) ||
+            (c.brief_facts || '').toLowerCase().includes(query) ||
+            (c.claimant || '').toLowerCase().includes(query) ||
+            (c.defendant || '').toLowerCase().includes(query) ||
+            (c.companies || '').toLowerCase().includes(query) ||
+            (c.directors || '').toLowerCase().includes(query) ||
+            (c.judge_name || '').toLowerCase().includes(query)
+          );
+        }
+
+        // 2. Search clients
+        const { data: clientsData } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('firm_id', user.firm_id);
+        
+        if (clientsData) {
+          clientsResult = clientsData.filter(c => 
+            (c.name || '').toLowerCase().includes(query) ||
+            (c.email || '').toLowerCase().includes(query) ||
+            (c.phone || '').toLowerCase().includes(query) ||
+            (c.company || '').toLowerCase().includes(query) ||
+            (c.description || '').toLowerCase().includes(query)
+          );
+        }
+
+        // 3. Search documents (Folders & Files)
+        const { data: filesData } = await supabase
+          .from('files')
+          .select('*')
+          .eq('firm_id', user.firm_id);
+        
+        const { data: foldersData } = await supabase
+          .from('folders')
+          .select('*')
+          .eq('firm_id', user.firm_id);
+
+        if (filesData) {
+          documentsResult = [
+            ...documentsResult,
+            ...filesData.filter(f => 
+              (f.name || '').toLowerCase().includes(query) ||
+              (f.category || '').toLowerCase().includes(query) ||
+              (f.description || '').toLowerCase().includes(query)
+            ).map(f => ({ id: f.id, name: f.name, type: 'File', case_id: f.case_id, category: f.category }))
+          ];
+        }
+
+        if (foldersData) {
+          documentsResult = [
+            ...documentsResult,
+            ...foldersData.filter(f => 
+              (f.name || '').toLowerCase().includes(query)
+            ).map(f => ({ id: f.id, name: f.name, type: 'Folder', case_id: f.case_id }))
+          ];
+        }
+
+        // 4. Search hearings (Events)
+        const { data: eventsData } = await supabase
+          .from('events')
+          .select('*')
+          .eq('firm_id', user.firm_id);
+        
+        if (eventsData) {
+          hearingsResult = eventsData.filter(e => 
+            (e.title || '').toLowerCase().includes(query) ||
+            (e.description || '').toLowerCase().includes(query) ||
+            (e.venue || '').toLowerCase().includes(query) ||
+            (e.judge || '').toLowerCase().includes(query)
+          ).map(e => ({ id: e.id, title: e.title, date: e.start_time || e.date, venue: e.venue, judge: e.judge, case_id: e.case_id }));
+        }
+
+        // 5. Search messages
+        const { data: messagesData } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('firm_id', user.firm_id);
+        
+        if (messagesData) {
+          messagesResult = messagesData.filter(m => 
+            (m.content || '').toLowerCase().includes(query) ||
+            (m.sender_name || '').toLowerCase().includes(query) ||
+            (m.recipient_name || '').toLowerCase().includes(query)
+          ).map(m => ({ id: m.id, content: m.content, sender: m.sender_name, receiver: m.recipient_name, date: m.created_at }));
+        }
+
+        // 6. Search Case Notes
+        const { data: notesData } = await supabase
+          .from('case_notes')
+          .select('*')
+          .eq('firm_id', user.firm_id);
+        
+        if (notesData) {
+          notesResult = notesData.filter(n => 
+            (n.note || '').toLowerCase().includes(query) ||
+            (n.author_name || '').toLowerCase().includes(query)
+          ).map(n => ({ id: n.id, note: n.note, author: n.author_name, case_id: n.case_id, date: n.created_at }));
+        }
+
+      } else {
+        // Search mock database in memory
+        const cases = db.mockCases || [];
+        casesResult = cases.filter((c: any) => 
+          (c.title || '').toLowerCase().includes(query) ||
+          (c.case_number || '').toLowerCase().includes(query) ||
+          (c.description || '').toLowerCase().includes(query) ||
+          (c.brief_facts || '').toLowerCase().includes(query) ||
+          (c.claimant || '').toLowerCase().includes(query) ||
+          (c.defendant || '').toLowerCase().includes(query) ||
+          (c.companies || '').toLowerCase().includes(query) ||
+          (c.directors || '').toLowerCase().includes(query) ||
+          (c.judge_name || '').toLowerCase().includes(query)
+        );
+
+        const clients = db.mockClients || [];
+        clientsResult = clients.filter((c: any) => 
+          (c.name || '').toLowerCase().includes(query) ||
+          (c.email || '').toLowerCase().includes(query) ||
+          (c.phone || '').toLowerCase().includes(query) ||
+          (c.company || '').toLowerCase().includes(query) ||
+          (c.description || '').toLowerCase().includes(query)
+        );
+
+        const files = db.mockFiles || [];
+        const folders = db.mockFolders || [];
+        documentsResult = [
+          ...files.filter((f: any) => 
+            (f.name || '').toLowerCase().includes(query) ||
+            (f.category || '').toLowerCase().includes(query) ||
+            (f.description || '').toLowerCase().includes(query)
+          ).map((f: any) => ({ id: f.id, name: f.name, type: 'File', case_id: f.case_id, category: f.category })),
+          ...folders.filter((f: any) => 
+            (f.name || '').toLowerCase().includes(query)
+          ).map((f: any) => ({ id: f.id, name: f.name, type: 'Folder', case_id: f.case_id }))
+        ];
+
+        const events = db.mockEvents || [];
+        hearingsResult = events.filter((e: any) => 
+          (e.title || '').toLowerCase().includes(query) ||
+          (e.description || '').toLowerCase().includes(query) ||
+          (e.venue || '').toLowerCase().includes(query) ||
+          (e.judge || '').toLowerCase().includes(query)
+        ).map((e: any) => ({ id: e.id, title: e.title, date: e.start_time || e.date, venue: e.venue, judge: e.judge, case_id: e.case_id }));
+
+        const messages = db.mockAtlasMessages || [];
+        messagesResult = messages.filter((m: any) => 
+          (m.content || '').toLowerCase().includes(query) ||
+          (m.sender_name || '').toLowerCase().includes(query) ||
+          (m.recipient_name || '').toLowerCase().includes(query)
+        ).map((m: any) => ({ id: m.id, content: m.content, sender: m.sender_name, receiver: m.recipient_name, date: m.created_at }));
+
+        const notes = db.mockCaseNotes || [];
+        notesResult = notes.filter((n: any) => 
+          (n.note || '').toLowerCase().includes(query) ||
+          (n.author_name || '').toLowerCase().includes(query)
+        ).map((n: any) => ({ id: n.id, note: n.note, author: n.author_name, case_id: n.case_id, date: n.created_at }));
+      }
+
+      return res.json({
+        cases: casesResult,
+        clients: clientsResult,
+        documents: documentsResult,
+        hearings: hearingsResult,
+        messages: messagesResult,
+        notes: notesResult
+      });
+
+    } catch (e: any) {
+      console.error("Universal Search aggregation error:", e);
+      return res.status(500).json({ error: e.message || "Failed to search system records" });
+    }
+  });
+
+  // --- Automatic Reminders Admin Endpoints ---
+  app.post("/api/admin/reminders/run", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    if (user.role !== 'Managing Partner') return res.status(403).json({ error: "Unauthorized" });
+    const result = await runAutomaticRemindersEngine();
+    res.json(result);
+  });
+
+  app.get("/api/admin/reminders/history", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    if (user.role !== 'Managing Partner') return res.status(403).json({ error: "Unauthorized" });
+    let logs: any[] = [];
+    if (supabase) {
+      const { data } = await supabase.from('email_logs').select('*').eq('firm_id', user.firm_id).order('sent_at', { ascending: false });
+      logs = data || [];
+    } else {
+      logs = db.mockEmailLogs || [];
+    }
+    const reminderLogs = logs.filter((log: any) => 
+      log.subject.includes('[7-Day Reminder]') ||
+      log.subject.includes('[3-Day Reminder]') ||
+      log.subject.includes('[1-Day Reminder]') ||
+      log.subject.includes('[2-Hour Urgent Reminder]') ||
+      log.subject.includes('[Overdue Task Reminder]')
+    );
+    res.json(reminderLogs);
+  });
+
+  // --- Automatic Backups Admin Endpoints ---
+  app.get("/api/admin/backups", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    if (user.role !== 'Managing Partner') return res.status(403).json({ error: "Unauthorized" });
+    if (supabase) {
+      const { data, error } = await supabase.from('backups').select('id, name, created_at').eq('firm_id', user.firm_id).order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data);
+    } else {
+      const backups = (db as any).mockBackups || [];
+      res.json(backups.map((b: any) => ({ id: b.id, name: b.name, created_at: b.created_at })));
+    }
+  });
+
+  app.post("/api/admin/backups", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    if (user.role !== 'Managing Partner') return res.status(403).json({ error: "Unauthorized" });
+    
+    const backupName = req.body.name || `Manual Backup - ${new Date().toLocaleString()}`;
+    
+    let backupPayload: Record<string, any> = {};
+    if (supabase) {
+      try {
+        const [clientsRes, casesRes, tasksRes, eventsRes, recordsRes] = await Promise.all([
+          supabase.from('clients').select('*').eq('firm_id', user.firm_id),
+          supabase.from('cases').select('*').eq('firm_id', user.firm_id),
+          supabase.from('tasks').select('*').eq('firm_id', user.firm_id),
+          supabase.from('events').select('*').eq('firm_id', user.firm_id),
+          supabase.from('time_records').select('*').eq('firm_id', user.firm_id)
+        ]);
+        
+        const caseIds = (casesRes.data || []).map((c: any) => c.id);
+        let notes: any[] = [];
+        let milestones: any[] = [];
+        
+        if (caseIds.length > 0) {
+          const [nRes, mRes] = await Promise.all([
+            supabase.from('case_notes').select('*').in('case_id', caseIds),
+            supabase.from('case_milestones').select('*').in('case_id', caseIds)
+          ]);
+          notes = nRes.data || [];
+          milestones = mRes.data || [];
+        }
+        
+        backupPayload = {
+          clients: clientsRes.data || [],
+          cases: casesRes.data || [],
+          tasks: tasksRes.data || [],
+          events: eventsRes.data || [],
+          case_milestones: milestones,
+          case_notes: notes,
+          time_records: recordsRes.data || []
+        };
+      } catch (err: any) {
+        return res.status(500).json({ error: `Failed to query tables: ${err.message}` });
+      }
+    } else {
+      backupPayload = {
+        clients: (db.mockClients || []).filter((c: any) => c.firm_id === user.firm_id),
+        cases: (db.mockCases || []).filter((c: any) => c.firm_id === user.firm_id),
+        tasks: (db.mockTasks || []).filter((t: any) => t.firm_id === user.firm_id),
+        events: (db.mockEvents || []).filter((e: any) => e.firm_id === user.firm_id),
+        case_milestones: (db.mockCaseMilestones || []),
+        case_notes: (db.mockCaseNotes || []),
+        time_records: (db.mockTimeRecords || []).filter((t: any) => t.firm_id === user.firm_id)
+      };
+    }
+    
+    if (supabase) {
+      const { data, error } = await supabase.from('backups').insert([{
+        firm_id: user.firm_id,
+        name: backupName,
+        data: backupPayload
+      }]).select('id, name, created_at').single();
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data);
+    } else {
+      (db as any).mockBackups = (db as any).mockBackups || [];
+      const newBackup = {
+        id: `backup-${Date.now()}`,
+        firm_id: user.firm_id,
+        name: backupName,
+        data: backupPayload,
+        created_at: new Date().toISOString()
+      };
+      (db as any).mockBackups.push(newBackup);
+      saveDb();
+      res.json({ id: newBackup.id, name: newBackup.name, created_at: newBackup.created_at });
+    }
+  });
+
+  app.post("/api/admin/backups/:id/restore", authenticateToken, async (req, res) => {
+    const user = (req as any).user;
+    if (user.role !== 'Managing Partner') return res.status(403).json({ error: "Unauthorized" });
+    
+    let backupData: any = null;
+    if (supabase) {
+      const { data, error } = await supabase.from('backups').select('*').eq('id', req.params.id).eq('firm_id', user.firm_id).single();
+      if (error || !data) return res.status(404).json({ error: "Backup not found" });
+      backupData = data.data;
+    } else {
+      const backups = (db as any).mockBackups || [];
+      const bObj = backups.find((b: any) => b.id === req.params.id && b.firm_id === user.firm_id);
+      if (!bObj) return res.status(404).json({ error: "Backup not found" });
+      backupData = bObj.data;
+    }
+    
+    if (!backupData) return res.status(400).json({ error: "Backup empty or corrupt" });
+    
+    if (supabase) {
+      try {
+        const { cases = [], clients = [], tasks = [], events = [], case_milestones = [], case_notes = [], time_records = [] } = backupData;
+        const caseIds = cases.map((c: any) => c.id);
+        
+        if (caseIds.length > 0) {
+          await supabase.from('case_milestones').delete().in('case_id', caseIds);
+          await supabase.from('case_notes').delete().in('case_id', caseIds);
+        }
+        await supabase.from('tasks').delete().eq('firm_id', user.firm_id);
+        await supabase.from('events').delete().eq('firm_id', user.firm_id);
+        await supabase.from('time_records').delete().eq('firm_id', user.firm_id);
+        await supabase.from('cases').delete().eq('firm_id', user.firm_id);
+        await supabase.from('clients').delete().eq('firm_id', user.firm_id);
+        
+        if (clients.length > 0) await supabase.from('clients').insert(clients);
+        if (cases.length > 0) await supabase.from('cases').insert(cases);
+        if (events.length > 0) await supabase.from('events').insert(events);
+        if (tasks.length > 0) await supabase.from('tasks').insert(tasks);
+        if (case_notes.length > 0) await supabase.from('case_notes').insert(case_notes);
+        if (case_milestones.length > 0) await supabase.from('case_milestones').insert(case_milestones);
+        if (time_records.length > 0) await supabase.from('time_records').insert(time_records);
+        
+      } catch (err: any) {
+        return res.status(500).json({ error: `Restore error: ${err.message}` });
+      }
+    } else {
+      const { cases = [], clients = [], tasks = [], events = [], case_milestones = [], case_notes = [], time_records = [] } = backupData;
+      
+      db.mockCases = db.mockCases.filter((c: any) => c.firm_id !== user.firm_id).concat(cases);
+      db.mockClients = db.mockClients.filter((c: any) => c.firm_id !== user.firm_id).concat(clients);
+      db.mockTasks = db.mockTasks.filter((t: any) => t.firm_id !== user.firm_id).concat(tasks);
+      db.mockEvents = db.mockEvents.filter((e: any) => e.firm_id !== user.firm_id).concat(events);
+      
+      const backupCaseIds = cases.map((c: any) => c.id);
+      db.mockCaseNotes = db.mockCaseNotes.filter((n: any) => !backupCaseIds.includes(n.case_id)).concat(case_notes);
+      db.mockCaseMilestones = db.mockCaseMilestones.filter((m: any) => !backupCaseIds.includes(m.case_id)).concat(case_milestones);
+      db.mockTimeRecords = db.mockTimeRecords.filter((t: any) => t.firm_id !== user.firm_id).concat(time_records);
+      
+      saveDb();
+    }
+    
+    res.json({ success: true, message: "Backup snapshot restored successfully" });
+  });
+
+  // --- Background Automation Scheduler (Requirement 19 & 20) ---
+  // Runs every 30 minutes to check reminders & daily backups
+  setInterval(async () => {
+    console.log("[Scheduler] Running periodic check...");
+    try {
+      // 1. Run automatic reminders
+      const reminderResult = await runAutomaticRemindersEngine();
+      if (reminderResult.success && reminderResult.sentCount > 0) {
+        console.log(`[Scheduler] Automatic reminders sent: ${reminderResult.sentCount}`);
+      }
+
+      // 2. Daily Automatic Backup
+      const todayStr = new Date().toISOString().split('T')[0];
+      let firmsToBackup: string[] = [];
+      if (supabase) {
+        const { data } = await supabase.from('firms').select('id');
+        firmsToBackup = (data || []).map((f: any) => f.id);
+      } else {
+        firmsToBackup = db.mockFirms.map(f => f.id);
+      }
+
+      for (const firmId of firmsToBackup) {
+        let alreadyBackedUp = false;
+        if (supabase) {
+          const { data } = await supabase
+            .from('backups')
+            .select('id')
+            .eq('firm_id', firmId)
+            .like('name', `Daily Auto-Backup - ${todayStr}%`)
+            .limit(1);
+          if (data && data.length > 0) {
+            alreadyBackedUp = true;
+          }
+        } else {
+          const mockBackups = (db as any).mockBackups || [];
+          alreadyBackedUp = mockBackups.some((b: any) => b.firm_id === firmId && b.name.startsWith(`Daily Auto-Backup - ${todayStr}`));
+        }
+
+        if (!alreadyBackedUp) {
+          console.log(`[Scheduler] Creating Daily Auto-Backup for firm: ${firmId}`);
+          let payload: Record<string, any> = {};
+          if (supabase) {
+            const [clientsRes, casesRes, tasksRes, eventsRes, recordsRes] = await Promise.all([
+              supabase.from('clients').select('*').eq('firm_id', firmId),
+              supabase.from('cases').select('*').eq('firm_id', firmId),
+              supabase.from('tasks').select('*').eq('firm_id', firmId),
+              supabase.from('events').select('*').eq('firm_id', firmId),
+              supabase.from('time_records').select('*').eq('firm_id', firmId)
+            ]);
+            
+            const caseIds = (casesRes.data || []).map((c: any) => c.id);
+            let notes: any[] = [];
+            let milestones: any[] = [];
+            if (caseIds.length > 0) {
+              const [nRes, mRes] = await Promise.all([
+                supabase.from('case_notes').select('*').in('case_id', caseIds),
+                supabase.from('case_milestones').select('*').in('case_id', caseIds)
+              ]);
+              notes = nRes.data || [];
+              milestones = mRes.data || [];
+            }
+
+            payload = {
+              clients: clientsRes.data || [],
+              cases: casesRes.data || [],
+              tasks: tasksRes.data || [],
+              events: eventsRes.data || [],
+              case_milestones: milestones,
+              case_notes: notes,
+              time_records: recordsRes.data || []
+            };
+
+            await supabase.from('backups').insert([{
+              firm_id: firmId,
+              name: `Daily Auto-Backup - ${todayStr}`,
+              data: payload
+            }]);
+          } else {
+            payload = {
+              clients: (db.mockClients || []).filter((c: any) => c.firm_id === firmId),
+              cases: (db.mockCases || []).filter((c: any) => c.firm_id === firmId),
+              tasks: (db.mockTasks || []).filter((t: any) => t.firm_id === firmId),
+              events: (db.mockEvents || []).filter((e: any) => e.firm_id === firmId),
+              case_milestones: (db.mockCaseMilestones || []),
+              case_notes: (db.mockCaseNotes || []),
+              time_records: (db.mockTimeRecords || []).filter((t: any) => t.firm_id === firmId)
+            };
+
+            (db as any).mockBackups = (db as any).mockBackups || [];
+            (db as any).mockBackups.push({
+              id: `backup-auto-${firmId}-${todayStr}`,
+              firm_id: firmId,
+              name: `Daily Auto-Backup - ${todayStr}`,
+              data: payload,
+              created_at: new Date().toISOString()
+            });
+            saveDb();
+          }
+          console.log(`[Scheduler] Daily Auto-Backup completed for firm: ${firmId}`);
+        }
+      }
+    } catch (err) {
+      console.error("[Scheduler] Background jobs error:", err);
+    }
+  }, 1000 * 60 * 30); // Runs every 30 minutes
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

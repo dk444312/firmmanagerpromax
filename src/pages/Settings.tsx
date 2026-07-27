@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Settings as SettingsIcon, Upload, Edit3, Key, Mail, Lock } from 'lucide-react';
+import { Settings as SettingsIcon, Upload, Edit3, Key, Mail, Lock, Database, RefreshCw, Bell, Play, CheckCircle2, Clock, List, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import bcrypt from 'bcryptjs';
+import toast from 'react-hot-toast';
 
 export default function Settings() {
   const { user, token, uiConfig, updateUiConfig } = useAuth();
@@ -30,10 +31,140 @@ export default function Settings() {
   });
   const [uiConfigMsg, setUiConfigMsg] = useState('');
 
+  // Backup & Reminder States (Requirement 19 & 20)
+  const [backups, setBackups] = useState<any[]>([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupName, setBackupName] = useState('');
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
+
+  const [reminderLogs, setReminderLogs] = useState<any[]>([]);
+  const [reminderLogsLoading, setReminderLogsLoading] = useState(false);
+  const [runningReminders, setRunningReminders] = useState(false);
+  const [reminderRunReport, setReminderRunReport] = useState<string[]>([]);
+
   useEffect(() => {
     // initialize from global state if present
     setUiMap((prev) => ({ ...prev, ...uiConfig }));
   }, [uiConfig]);
+
+  const fetchBackupsAndLogs = async () => {
+    if (!token || user?.role !== 'Managing Partner') return;
+    try {
+      setBackupsLoading(true);
+      const res = await fetch('/api/admin/backups', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBackups(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBackupsLoading(false);
+    }
+
+    try {
+      setReminderLogsLoading(true);
+      const res = await fetch('/api/admin/reminders/history', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReminderLogs(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setReminderLogsLoading(false);
+    }
+  };
+
+  const handleCreateBackup = async () => {
+    if (!token) return;
+    try {
+      setCreatingBackup(true);
+      const res = await fetch('/api/admin/backups', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ name: backupName })
+      });
+      if (res.ok) {
+        toast.success("System backup snapshot created successfully!");
+        setBackupName('');
+        fetchBackupsAndLogs();
+      } else {
+        toast.error("Failed to create system backup");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error creating system backup");
+    } finally {
+      setCreatingBackup(false);
+    }
+  };
+
+  const handleRestoreBackup = async (id: string) => {
+    if (!token) return;
+    if (!window.confirm("CRITICAL WARNING: Restoring this backup will overwrite all current cases, clients, tasks, and calendar events with the snapshot data. This action is irreversible. Do you wish to continue?")) {
+      return;
+    }
+    try {
+      setRestoringBackupId(id);
+      const res = await fetch(`/api/admin/backups/${id}/restore`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        toast.success("System data restored to snapshot successfully!");
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        toast.error("Failed to restore system backup");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error restoring system backup");
+    } finally {
+      setRestoringBackupId(null);
+    }
+  };
+
+  const handleRunReminders = async () => {
+    if (!token) return;
+    try {
+      setRunningReminders(true);
+      setReminderRunReport([]);
+      const res = await fetch('/api/admin/reminders/run', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          toast.success(`Scan complete! Reminders sent: ${data.sentCount}`);
+          setReminderRunReport(data.reports || ["No new reminders needed at this time."]);
+          fetchBackupsAndLogs();
+        } else {
+          toast.error("Reminders scan failed");
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error running reminders scanning engine");
+    } finally {
+      setRunningReminders(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role === 'Managing Partner') {
+      fetchBackupsAndLogs();
+    }
+  }, [user, token]);
 
   useEffect(() => {
     if (user && user.role === 'Managing Partner' && supabase) {
@@ -329,6 +460,133 @@ export default function Settings() {
               <button onClick={handleSaveConfig} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-medium shadow-lg transition-colors text-sm">
                 Save Customization
               </button>
+            </div>
+          </div>
+
+          {/* Backup & Recovery Panel (Requirement 20) */}
+          <div className="bg-[#151619] border border-white/10 rounded-2xl p-8 mb-8">
+            <h2 className="text-xl font-medium text-white mb-6 flex items-center gap-2">
+              <Database className="w-5 h-5 text-emerald-400" /> Automatic Daily Backups & Disaster Recovery
+            </h2>
+            <p className="text-slate-400 text-sm mb-6">
+              To ensure absolute business continuity, the system automatically performs daily state backups. In the event of accidental deletions, corruption, or audit requests, administrators can restore the system state to any prior snapshot.
+            </p>
+
+            <div className="bg-[#0a0a0a] rounded-xl p-6 border border-white/5 mb-8 space-y-4">
+              <h3 className="text-sm font-semibold text-slate-300">Create Manual Backup Snapshot</h3>
+              <div className="flex gap-4">
+                <input
+                  type="text"
+                  value={backupName}
+                  onChange={(e) => setBackupName(e.target.value)}
+                  placeholder="e.g. Pre-Audit Snapshot July 2026"
+                  className="flex-1 bg-[#151619] border border-white/10 rounded px-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors text-sm"
+                />
+                <button
+                  onClick={handleCreateBackup}
+                  disabled={creatingBackup}
+                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm px-5 py-2 rounded font-medium transition-colors"
+                >
+                  {creatingBackup ? 'Creating Snapshot...' : 'Create Backup Snapshot'}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-400" /> Backup Recovery Logs & Snapshots
+              </h3>
+              {backupsLoading ? (
+                <div className="text-center text-xs text-slate-500 py-4">Querying archives...</div>
+              ) : backups.length === 0 ? (
+                <div className="text-center text-xs text-slate-500 py-4 border border-dashed border-white/5 rounded-xl">No prior backup snapshots registered.</div>
+              ) : (
+                <div className="divide-y divide-white/5 border border-white/5 rounded-xl overflow-hidden bg-[#0a0a0a]">
+                  {backups.map((b) => (
+                    <div key={b.id} className="p-4 flex items-center justify-between hover:bg-white/[0.01] transition-colors">
+                      <div>
+                        <span className="font-semibold text-slate-200 text-sm block">{b.name}</span>
+                        <span className="text-xs text-slate-500 font-mono">{new Date(b.created_at).toLocaleString()}</span>
+                      </div>
+                      <button
+                        onClick={() => handleRestoreBackup(b.id)}
+                        disabled={restoringBackupId !== null}
+                        className="flex items-center gap-1.5 border border-amber-500/30 hover:bg-amber-500 hover:text-black text-amber-500 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${restoringBackupId === b.id ? 'animate-spin' : ''}`} />
+                        {restoringBackupId === b.id ? 'Restoring...' : 'Restore State'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Automated Reminders Panel (Requirement 19) */}
+          <div className="bg-[#151619] border border-white/10 rounded-2xl p-8 mb-8">
+            <h2 className="text-xl font-medium text-white mb-6 flex items-center gap-2">
+              <Bell className="w-5 h-5 text-emerald-400" /> Automated Hearing & Task Reminders
+            </h2>
+            <p className="text-slate-400 text-sm mb-6">
+              The automated email engine proactively scans calendar event rosters and tasks database. Hearing reminders are automatically dispatched 7 days, 3 days, 1 day, and 2 hours prior to scheduled court times. Overdue tasks trigger daily email reminders to assignees until completed.
+            </p>
+
+            <div className="bg-[#0a0a0a] rounded-xl p-6 border border-white/5 mb-8 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-300">Run Automated Reminders Dispatch</h3>
+                  <p className="text-xs text-slate-500 mt-1">Force an on-demand background scan of the event logs and overdue task boards.</p>
+                </div>
+                <button
+                  onClick={handleRunReminders}
+                  disabled={runningReminders}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm px-5 py-2.5 rounded font-medium transition-colors"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  {runningReminders ? 'Scanning System...' : 'Execute Reminders Scan'}
+                </button>
+              </div>
+
+              {reminderRunReport.length > 0 && (
+                <div className="bg-black rounded-lg p-4 font-mono text-xs text-emerald-400 border border-emerald-500/20 max-h-48 overflow-y-auto space-y-1">
+                  <span className="text-slate-500 block border-b border-white/10 pb-1 mb-2">Scan Report Console:</span>
+                  {reminderRunReport.map((rep, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <span className="text-emerald-600 select-none">&gt;</span>
+                      <span>{rep}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                <List className="w-4 h-4 text-emerald-400" /> Automated Reminders History logs
+              </h3>
+              {reminderLogsLoading ? (
+                <div className="text-center text-xs text-slate-500 py-4">Querying dispatcher logs...</div>
+              ) : reminderLogs.length === 0 ? (
+                <div className="text-center text-xs text-slate-500 py-4 border border-dashed border-white/5 rounded-xl">No automated reminders logged recently.</div>
+              ) : (
+                <div className="divide-y divide-white/5 border border-white/5 rounded-xl overflow-hidden bg-[#0a0a0a]">
+                  {reminderLogs.slice(0, 8).map((log) => (
+                    <div key={log.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-2 hover:bg-white/[0.01] transition-colors">
+                      <div>
+                        <span className="font-semibold text-slate-200 text-sm block">{log.subject}</span>
+                        <span className="text-xs text-slate-500">Recipient: <span className="font-mono text-slate-400">{log.recipient_email}</span></span>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0 self-start md:self-auto">
+                        <span className="text-[10px] font-mono text-slate-500">{new Date(log.sent_at).toLocaleString()}</span>
+                        <span className="text-[10px] uppercase tracking-wide bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-bold">
+                          SENT
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </>

@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS cases (
     judge_name TEXT,
     brief_facts TEXT,
     status TEXT DEFAULT 'Active' CHECK (status IN ('Active', 'Pending', 'Closed')),
+    labels TEXT[] DEFAULT '{}',
+    likelihood_of_loss_gain NUMERIC DEFAULT 0,
+    potential_loss NUMERIC DEFAULT 0,
+    estimated_legal_fees NUMERIC DEFAULT 0,
+    department TEXT DEFAULT 'General',
+    case_type TEXT DEFAULT 'Civil',
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -269,4 +275,123 @@ CREATE TRIGGER trigger_send_email_on_log
   FOR EACH ROW
   WHEN (NEW.status = 'pending')
   EXECUTE FUNCTION public.send_email_via_resend();
+
+
+-- -----------------------------------------------------------------
+-- CHRONOLOGICAL CASE TIMELINE & METADATA UPGRADES
+-- -----------------------------------------------------------------
+
+-- Table for Case Milestones (Timeline)
+CREATE TABLE IF NOT EXISTS public.case_milestones (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    case_id UUID NOT NULL REFERENCES public.cases(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Completed', 'Not Applicable')),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable RLS on case_milestones and add permissive policies
+ALTER TABLE public.case_milestones ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select on milestones" ON public.case_milestones FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on milestones" ON public.case_milestones FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update on milestones" ON public.case_milestones FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete on milestones" ON public.case_milestones FOR DELETE USING (true);
+
+-- Alter Files Table to support Metadata
+ALTER TABLE public.files ADD COLUMN IF NOT EXISTS doc_type TEXT DEFAULT 'Other';
+ALTER TABLE public.files ADD COLUMN IF NOT EXISTS version_number TEXT DEFAULT '1.0';
+ALTER TABLE public.files ADD COLUMN IF NOT EXISTS author TEXT;
+ALTER TABLE public.files ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE public.files ADD COLUMN IF NOT EXISTS tags TEXT; -- Comma-separated tags
+ALTER TABLE public.files ADD COLUMN IF NOT EXISTS classification TEXT DEFAULT 'Working Draft' CHECK (classification IN ('Confidential', 'Court Copy', 'Working Draft', 'Final Copy'));
+
+-- Table for File Version History
+CREATE TABLE IF NOT EXISTS public.file_versions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    file_id UUID NOT NULL REFERENCES public.files(id) ON DELETE CASCADE,
+    version_number TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    file_url TEXT NOT NULL,
+    author TEXT,
+    notes TEXT,
+    doc_type TEXT DEFAULT 'Other',
+    tags TEXT,
+    classification TEXT DEFAULT 'Working Draft',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable RLS on file_versions and add permissive policies
+ALTER TABLE public.file_versions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select on file_versions" ON public.file_versions FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on file_versions" ON public.file_versions FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update on file_versions" ON public.file_versions FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete on file_versions" ON public.file_versions FOR DELETE USING (true);
+
+-- Upgrade for Case Notes: Pinned state, Rich notes (already has content, let's add pinning)
+ALTER TABLE public.case_notes ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT false;
+ALTER TABLE public.case_notes ADD COLUMN IF NOT EXISTS author_name TEXT;
+
+-- Upgrade for Conflict Check: Companies, Directors on cases
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS companies TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS directors TEXT;
+
+-- Table for Time Recording Module
+CREATE TABLE IF NOT EXISTS public.time_records (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+    staff_id UUID NOT NULL REFERENCES public.staff(id) ON DELETE CASCADE,
+    case_id UUID REFERENCES public.cases(id) ON DELETE SET NULL,
+    case_title TEXT,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    nature_of_work TEXT NOT NULL, -- 'drafting', 'legal research', 'court attendance', 'consultations', 'travelling', 'telephone calls'
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable RLS and add permissive policies for time_records
+ALTER TABLE public.time_records ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select on time_records" ON public.time_records FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on time_records" ON public.time_records FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update on time_records" ON public.time_records FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete on time_records" ON public.time_records FOR DELETE USING (true);
+
+-- Table for Audit Trail Logs
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+    staff_id UUID REFERENCES public.staff(id) ON DELETE SET NULL,
+    staff_name TEXT,
+    action TEXT NOT NULL,
+    details TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable RLS and add permissive policies (only select/insert, no update or delete for immutability)
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select on audit_logs" ON public.audit_logs FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on audit_logs" ON public.audit_logs FOR INSERT WITH CHECK (true);
+
+-- Table for backups
+CREATE TABLE IF NOT EXISTS public.backups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    data JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable RLS and add permissive policies
+ALTER TABLE public.backups ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select on backups" ON public.backups FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on backups" ON public.backups FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update on backups" ON public.backups FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete on backups" ON public.backups FOR DELETE USING (true);
+
+
+
 

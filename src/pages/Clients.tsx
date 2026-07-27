@@ -34,6 +34,14 @@ export default function Clients() {
     fetchClients();
   }, [token, user]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('action') === 'new') {
+      openAddModal();
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !supabase || !user) return;
